@@ -85,7 +85,8 @@ NAS 上拉取（在 docker-compose.yml 所在目录）：
 
 以后更新代码就是「重跑本脚本 → NAS 上 docker compose pull && docker compose up -d --no-build」。
 
-注意：GHCR 的 package 默认可能不是公开的。
-如果 NAS 拉取时报 denied，去 GitHub → 你的头像 → Packages → lookcam
-→ Package settings → Change visibility → Public。
+注意：公开仓库用 GITHUB_TOKEN 推上去的 package 会继承仓库可见性，
+一般不用额外设置（实测匿名拉取返回 200）。只有在 NAS 拉取报 denied 时，
+才需要去 GitHub → 头像 → Packages → lookcam → Package settings
+→ Change visibility → Public。
 TIPS
