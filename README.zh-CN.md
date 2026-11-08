@@ -125,7 +125,7 @@ docker compose up -d --no-build
 
 仓库里已有 `.github/workflows/docker.yml`。每次 push 到 `main`、打 `v*` 标签，或手动触发，都会在 GitHub 的机器上构建 **`linux/amd64` + `linux/arm64` 双架构**镜像，推到 `ghcr.io/caicaiks/lookcam:latest`。用的是内置的 `GITHUB_TOKEN` 和 `packages: write` 权限，公开仓库免费，**不用申请任何密钥**。
 
-推完到 Actions 页看构建结果。第一次构建完，去 `GitHub → Packages → lookcam → Package settings` 把可见性改成 **Public**，否则 NAS 拉取会报 `denied`。
+推完到 Actions 页看构建结果。公开仓库用 `GITHUB_TOKEN` 推上去的包会继承仓库可见性（实测匿名拉取返回 200），一般不用额外设置；万一 NAS 拉取报 `denied`，再去 `GitHub → Packages → lookcam → Package settings` 把可见性改成 **Public**。
 
 **B. 本机构建并推送**
 

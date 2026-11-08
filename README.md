@@ -124,7 +124,7 @@ Less bookkeeping than shipping a tarball: push to a registry and let the NAS run
 
 `.github/workflows/docker.yml` is already in the repo. Any push to `main`, a `v*` tag, or a manual run builds **both `linux/amd64` and `linux/arm64`** on GitHub's runners and publishes `ghcr.io/caicaiks/lookcam:latest`. It uses the built-in `GITHUB_TOKEN` with `packages: write`; public repos are free and **no secret needs to be created**.
 
-Check the Actions tab after pushing. Once, after the first build, go to `GitHub → Packages → lookcam → Package settings` and set visibility to **Public**, otherwise the NAS will get `denied` when pulling.
+Check the Actions tab after pushing. Packages pushed with `GITHUB_TOKEN` from a public repo inherit that visibility — an anonymous pull returned 200 in testing, so there's usually nothing to configure. If the NAS ever gets `denied`, go to `GitHub → Packages → lookcam → Package settings` and set visibility to **Public**.
 
 **B. Build and push from your machine**
 
