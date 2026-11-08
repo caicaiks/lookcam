@@ -249,9 +249,10 @@ The UI tells you when each change takes effect:
 
 - The index lives in `DATA_DIR/index.json`. In memory it's a Map and queries are plain iteration — 20k clips a year is a few MB, so a database would be dead weight
 - **First run** scans everything, reading a few dozen KB from the head and tail of each file to get its duration
-- **After that** it's incremental: new directories are always scanned; ones whose name says today or yesterday are rescanned; ones with no date in the name (flat layouts, month buckets) are compared by directory mtime; everything else is skipped without even a `stat`
+- **After that** it's incremental: new directories are always scanned; today's and yesterday's are rescanned every round; the rest are compared by a **fingerprint of their mp4 filenames**. It's computed from the `readdir` results already in hand, so there's no extra `stat` — even over a network mount a round takes a fraction of a second
 - Durations already probed are reused when the filename and file size are unchanged
-- **Full rescan** (the "scan now" button) also prunes records for footage that's gone from disk. It takes minutes, so the endpoint fires and returns, and the UI polls for status
+- **When footage expires and is deleted, the index follows.** Every round re-checks directories that the index knows about but the walk didn't return, and removes a record only after confirming the directory is genuinely gone or has no mp4 left. A directory that merely failed to read (permission blip, dropped mount) is kept, so a transient error can't wipe the index. Deleting some files inside a still-present directory is detected by the fingerprint change
+- A **full rescan runs automatically every 24 hours** as a backstop; the "scan now" button in settings also forces one. It takes minutes, so the endpoint fires and returns, and the UI polls for status
 - A corrupt index is backed up as `index.json.bad.<timestamp>` before being rebuilt — never silently discarded
 
 **The footage directory is mounted read-only.** Everything written, thumbnails included, goes to `DATA_DIR`. Your camera's folder is never touched, and the NAS sync job never gets pulled into a loop.
@@ -311,9 +312,17 @@ Add a query parameter to run checks in the browser. Results go into a hidden `<p
 
 | Parameter | What it does |
 |---|---|
-| `?selftest=1` | 28 UI-level assertions (index, calendar, timeline, `Range` requests, volume, settings read/write/reset). The title becomes `selftest 28/28` |
+| `?selftest=1` | 34 UI-level assertions (index, calendar, timeline, `Range` requests, volume, settings read/write/reset, playing after picking a date). The title becomes `selftest 34/34` |
 | `?videotest=1` | Actually decodes a frame onto a canvas and measures brightness — separates "decoding is broken" from "that moment was genuinely dark" |
 | `?debug=1` | Mirrors `video` readyState / currentTime / duration / resolution into the title |
+
+The server-side expiry cleanup has its own regression test. It only uses a temp directory and fake files — your real footage is never touched:
+
+```bash
+node test/prune.js
+```
+
+It covers whole-directory deletion, deleting some files inside a directory, permission blips not wiping the index, on-disk/reload consistency, and upgrading an old index without a full rescan.
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \

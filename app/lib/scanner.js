@@ -20,6 +20,7 @@
 
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const { probe } = require('./mp4');
 
 const MP4 = /\.mp4$/i;
@@ -115,6 +116,28 @@ function hasClip(entries) {
 }
 
 /**
+ * 目录内容指纹：只用 readdir 已经拿到的文件名，零额外 I/O。
+ *
+ * 为什么不用目录 mtime：SMB / 网络挂载上每个 stat 都是一次网络往返，
+ * 1,500 个目录实测要 33 秒，而纯 readdir 只要 1 秒。而且 mtime 在部分
+ * NAS 上删除文件后未必更新，反而不准。文件名列表变了就一定有增删，
+ * 这正是「录像过期被清理」要感知的信号；同名文件被改写这类罕见情况
+ * 交给每日全量扫描兜底。
+ */
+function sigFromNames(names) {
+  const sorted = [...names].sort();
+  return sorted.length + ':' + crypto.createHash('sha1').update(sorted.join('\n')).digest('hex').slice(0, 16);
+}
+
+function dirSig(entries) {
+  return sigFromNames(
+    entries
+      .filter((e) => e.isFile() && !e.name.startsWith('.') && MP4.test(e.name))
+      .map((e) => e.name)
+  );
+}
+
+/**
  * 列出所有「装着 mp4 的目录」。
  * 不限定命名、不限定层级（深度由 cfg.scanDepth 控制，默认 4 层）。
  */
@@ -133,17 +156,7 @@ async function listDirs(cfg) {
     }
 
     if (hasClip(entries)) {
-      const dayHint = dayFromName(rel);
-      // 名字里能看出日期就不用 stat；看不出才取 mtime 给增量扫描做判断
-      let mtimeMs = 0;
-      if (!dayHint) {
-        try {
-          mtimeMs = (await fs.stat(abs)).mtimeMs;
-        } catch {
-          /* 拿不到 mtime 就当它没变过，下一轮再说 */
-        }
-      }
-      out.push({ rel, abs, dayHint, mtimeMs });
+      out.push({ rel, abs, dayHint: dayFromName(rel), sig: dirSig(entries) });
     }
 
     if (depth >= maxDepth) return;
@@ -242,4 +255,4 @@ async function scanDir(cfg, info, known) {
   return { segs: segs.filter(Boolean).sort((a, b) => a.ts - b.ts), sources };
 }
 
-module.exports = { listDirs, scanDir, dayFromName, resolveTs, dirDate };
+module.exports = { listDirs, scanDir, dayFromName, resolveTs, dirDate, dirSig, sigFromNames, MP4 };

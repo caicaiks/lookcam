@@ -10,7 +10,7 @@
 
 const fs = require('fs/promises');
 const path = require('path');
-const { listDirs, scanDir, dayFromName } = require('./scanner');
+const { listDirs, scanDir, dayFromName, sigFromNames, MP4 } = require('./scanner');
 
 /* v2：时间改为从片段自身的 ts 推（不再依赖 YYYYMMDDHH 目录名），
    dirs 的 key 从「设备/日期小时」变成「相对路径」。旧索引的 key 不可复用，直接重建。 */
@@ -55,7 +55,7 @@ function migrateV1(dirs) {
   for (const key of Object.keys(dirs)) {
     const d = dirs[key] || {};
     const rel = key.startsWith('_/') ? key.slice(2) : key;
-    out[rel] = { rel, scannedAt: d.scannedAt || 0, mt: 0, segs: d.segs || [] };
+    out[rel] = { rel, scannedAt: d.scannedAt || 0, sig: '', segs: d.segs || [] };
   }
   return out;
 }
@@ -64,7 +64,7 @@ class Store {
   constructor(cfg, log) {
     this.cfg = cfg;
     this.log = log || console.log;
-    /** @type {Record<string, {rel:string,scannedAt:number,segs:any[]}>} */
+    /** @type {Record<string, {rel:string,scannedAt:number,sig?:string,segs:any[]}>} */
     this.dirs = {};
     this.byDay = new Map(); // day -> seg[]
     this.updatedAt = 0;
@@ -181,19 +181,22 @@ class Store {
 
       // 增量策略（按代价从低到高）：
       //   1. 新目录 —— 一定扫
-      //   2. 目录名里看得出日期 —— 今天/昨天可能还在写入，重扫；更早的直接跳过
-      //   3. 目录名里看不出日期（扁平结构、按月分的）—— 才去看 mtime 有没有变
+      //   2. 今天/昨天的目录 —— 可能还在写入，每轮都重扫
+      //   3. 其余目录 —— 比对「目录内容指纹」，文件名列表有增删才重扫
       //
-      // 第 3 条刻意拿「这次读到的 mtime」和「上次存下的 mtime」比，而不是和 scannedAt 比：
-      // 后者是拿 NAS 的时钟减本机的时钟，挂载点两边时钟差几分钟就会永远判定「没变」，
-      // 新录像再也扫不进来。自己和自己比就不存在这个问题。
+      // 指纹是 listDirs 用 readdir 顺手算出来的，不额外 stat。
+      // 早期版本拿 mtime 和 scannedAt 比，那是 NAS 时钟减本机时钟，
+      // 两边差几分钟就会永远判「没变」；后来改成 mtime 自比，但 SMB 上
+      // 每个目录一次 stat 要 30 多秒。指纹既没有时钟问题，也几乎零成本。
       const todo = dirs.filter((d) => {
         if (full) return true;
         const prev = this.dirs[d.rel];
         if (!prev) return true;
-        if (d.dayHint) return d.dayHint === today || d.dayHint === yesterday;
-        if (!prev.mt) return true; // 老记录没存过 mtime，扫一次补上
-        return d.mtimeMs !== prev.mt;
+        if (d.dayHint === today || d.dayHint === yesterday) return true;
+        // 老索引没存指纹，但每条片段都有文件名，直接算出来比对，
+        // 这样升级不用把全库重扫一遍。名字没变就说明目录内容没变。
+        const oldSig = prev.sig || sigFromNames((prev.segs || []).map((s) => s.name));
+        return d.sig !== oldSig;
       });
 
       this.log(
@@ -220,7 +223,7 @@ class Store {
             this.dirs[info.rel] = {
               rel: info.rel,
               scannedAt: Date.now(),
-              mt: info.mtimeMs || 0,
+              sig: info.sig,
               segs: segs.map((s) => ({
                 name: s.name,
                 ts: s.ts,
@@ -240,18 +243,45 @@ class Store {
 
       await Promise.all(Array.from({ length: Math.min(concurrency, todo.length) }, worker));
 
-      // 全量扫描时顺手清掉磁盘上已经不存在的目录记录
-      if (full) {
-        const alive = new Set(dirs.map((d) => d.rel));
-        let pruned = 0;
-        for (const key of Object.keys(this.dirs)) {
-          if (!alive.has(key)) {
+      // 没被重扫的目录也把指纹记上，下一轮就能直接比，不用再从文件名反推
+      for (const d of dirs) if (this.dirs[d.rel]) this.dirs[d.rel].sig = d.sig;
+
+      // ── 清理已经没有录像的目录 ──────────────────────────────────────
+      // 录像只保留最近 N 个月时，NAS 每天都会删掉一批旧目录。以前这段只在
+      // full 时执行，而定时扫描永远是增量，于是 `dirs` 里不存在的旧目录
+      // 根本不会进入 todo，索引里的片段永远不消失：日历还能点到三个月前，
+      // 点进去却是 404。现在每次扫描都清。
+      //
+      // 但「这次没扫到」不等于「被删了」：readdir 可能因权限抖动或 SMB
+      // 断连失败。所以逐个复核，只删真的不存在 / 真的一个 mp4 都没有的；
+      // 读不动的一律留着等下一轮，别让一次网络抖动把索引清掉一半。
+      const alive = new Set(dirs.map((d) => d.rel));
+      const stale = Object.keys(this.dirs).filter((k) => !alive.has(k));
+      let pruned = 0;
+      let kept = 0;
+      for (const key of stale) {
+        const abs = path.join(this.cfg.watchDir, ...(key ? key.split('/') : []));
+        let names;
+        try {
+          names = await fs.readdir(abs);
+        } catch (e) {
+          if (e.code === 'ENOENT' || e.code === 'ENOTDIR') {
             delete this.dirs[key];
             pruned++;
+          } else {
+            kept++;
           }
+          continue;
         }
-        if (pruned) this.log(`[scan] 清理了 ${pruned} 个已消失的目录`);
+        if (!names.some((n) => MP4.test(n))) {
+          delete this.dirs[key];   // 目录还在，但 mp4 被清理脚本删光了
+          pruned++;
+        } else {
+          kept++;
+        }
       }
+      if (pruned) this.log(`[scan] 清理 ${pruned} 个已无录像的目录（过期删除）`);
+      if (kept) this.log(`[scan] ${kept} 个目录暂时读不到 / 内容有变，保留索引等下一轮`);
 
       this.reindex();
       this.lastScanAt = Date.now();

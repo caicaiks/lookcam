@@ -29,6 +29,10 @@ const store = new Store(cfg, log);
 // ---------------- 设置生效 ----------------
 
 let scanTimer = null;
+// 每 24 小时把一次定时扫描升级成全量：兜住「目录还在、只删了里面部分文件」
+// 但目录 mtime 没被 NAS 更新之类的漏网情况，也顺便补齐偶发失败的子目录。
+const FULL_SCAN_EVERY_MS = 24 * 60 * 60 * 1000;
+let lastFullAt = Date.now();
 
 /** 按当前配置（重新）安排定时扫描。设置页改了间隔会走这里 */
 function scheduleScans() {
@@ -36,9 +40,14 @@ function scheduleScans() {
   scanTimer = null;
   if (cfg.scanInterval > 0) {
     scanTimer = setInterval(() => {
-      store.scan({ full: false }).catch(() => {});
+      const full = Date.now() - lastFullAt >= FULL_SCAN_EVERY_MS;
+      if (full) {
+        lastFullAt = Date.now();
+        log('[scan] 每日全量扫描开始（核对过期删除、补齐漏扫）');
+      }
+      store.scan({ full }).catch(() => {});
     }, cfg.scanInterval * 60 * 1000);
-    log(`[scan] 自动扫描：每 ${cfg.scanInterval} 分钟`);
+    log(`[scan] 自动扫描：每 ${cfg.scanInterval} 分钟，每天一次全量`);
   } else {
     log('[scan] 自动扫描已关闭（扫描间隔为 0，只在启动和手动时扫）');
   }
