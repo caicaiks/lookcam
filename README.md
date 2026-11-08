@@ -116,6 +116,49 @@ Updating later is the same loop: rerun the script → copy → load → up.
 > You need a working Docker engine and the buildx plugin locally (Docker Desktop, OrbStack, or colima). Cross-architecture builds run under QEMU emulation, so they're slower than native — and you may need to install binfmt once:
 > `docker run --privileged --rm tonistiigi/binfmt --install amd64`
 
+### Publish an image so the NAS can just pull it
+
+Less bookkeeping than shipping a tarball: push to a registry and let the NAS run `docker compose pull`. Two routes:
+
+**A. Let GitHub Actions do it (recommended — no Docker engine needed locally)**
+
+`.github/workflows/docker.yml` is already in the repo. Any push to `main`, a `v*` tag, or a manual run builds **both `linux/amd64` and `linux/arm64`** on GitHub's runners and publishes `ghcr.io/caicaiks/lookcam:latest`. It uses the built-in `GITHUB_TOKEN` with `packages: write`; public repos are free and **no secret needs to be created**.
+
+Check the Actions tab after pushing. Once, after the first build, go to `GitHub → Packages → lookcam → Package settings` and set visibility to **Public**, otherwise the NAS will get `denied` when pulling.
+
+**B. Build and push from your machine**
+
+You need a local Docker engine, buildx, and registry credentials:
+
+```bash
+# GHCR, reusing your gh CLI token (needs write:packages)
+gh auth refresh -s write:packages
+echo "$(gh auth token)" | docker login ghcr.io -u "$(gh api user --jq .login)" --password-stdin
+./push-image.sh
+
+# Or push to Docker Hub instead
+REGISTRY=docker.io/<your-user> ./push-image.sh
+```
+
+> A multi-arch image can't be `--load`ed locally; buildx has to `--push` it directly, so a registry account is unavoidable here. If you only need x86, `PLATFORMS=linux/amd64 ./push-image.sh` is much faster.
+
+**Switch the NAS to pulling**
+
+Add one line to `.env`:
+
+```ini
+LOOKCAM_IMAGE=ghcr.io/caicaiks/lookcam:latest
+```
+
+```bash
+docker compose pull
+docker compose up -d --no-build
+```
+
+From then on: wait for Actions (or rerun `push-image.sh`), then on the NAS run `docker compose pull && docker compose up -d --no-build`.
+
+---
+
 ## Where your footage can live
 
 The scanner makes no assumptions about directory layout. **Time comes from the clip itself, not from where it's stored** — the folder name is just how files are grouped; the real timestamp is in the filename.

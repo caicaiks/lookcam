@@ -2,7 +2,10 @@ services:
   lookcam:
     build:
       context: ./app
-    image: lookcam:latest
+    # 默认用本地构建的镜像；想从仓库拉取时，在 .env 里设
+    #   LOOKCAM_IMAGE=ghcr.io/caicaiks/lookcam:latest
+    # 然后 docker compose pull && docker compose up -d --no-build
+    image: "${LOOKCAM_IMAGE:-lookcam:latest}"
     container_name: lookcam
     restart: unless-stopped
 

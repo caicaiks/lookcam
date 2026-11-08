@@ -117,6 +117,49 @@ docker compose up -d --no-build
 > 本机需要有可用的 Docker 引擎和 buildx 插件（Docker Desktop / OrbStack / colima 任一）。跨架构构建走 QEMU 模拟，会比原生慢，第一次还可能要先装 binfmt：
 > `docker run --privileged --rm tonistiigi/binfmt --install amd64`
 
+### 发布到镜像仓库，让 NAS 直接 pull
+
+比传 tar 更省事：镜像推到仓库，NAS 上 `docker compose pull` 就能更新。两条路：
+
+**A. 交给 GitHub Actions（推荐，本机完全不用装 Docker）**
+
+仓库里已有 `.github/workflows/docker.yml`。每次 push 到 `main`、打 `v*` 标签，或手动触发，都会在 GitHub 的机器上构建 **`linux/amd64` + `linux/arm64` 双架构**镜像，推到 `ghcr.io/caicaiks/lookcam:latest`。用的是内置的 `GITHUB_TOKEN` 和 `packages: write` 权限，公开仓库免费，**不用申请任何密钥**。
+
+推完到 Actions 页看构建结果。第一次构建完，去 `GitHub → Packages → lookcam → Package settings` 把可见性改成 **Public**，否则 NAS 拉取会报 `denied`。
+
+**B. 本机构建并推送**
+
+需要本机有 Docker 引擎、buildx，以及仓库登录凭证：
+
+```bash
+# GHCR：用 gh 的凭证（需要 write:packages 权限）
+gh auth refresh -s write:packages
+echo "$(gh auth token)" | docker login ghcr.io -u "$(gh api user --jq .login)" --password-stdin
+./push-image.sh
+
+# 或推到 Docker Hub
+REGISTRY=docker.io/<你的用户名> ./push-image.sh
+```
+
+> 多架构镜像没法 `--load` 到本地，只能构建完直接 `--push`，所以这一步绕不开仓库账号。只出 x86 的话用 `PLATFORMS=linux/amd64 ./push-image.sh`，会快很多。
+
+**NAS 上改用拉取**
+
+`.env` 里加一行：
+
+```ini
+LOOKCAM_IMAGE=ghcr.io/caicaiks/lookcam:latest
+```
+
+```bash
+docker compose pull
+docker compose up -d --no-build
+```
+
+以后更新：等 Actions 跑完（或重跑 `push-image.sh`）→ NAS 上 `docker compose pull && docker compose up -d --no-build`。
+
+---
+
 ## 录像放哪都行
 
 扫描器不假设目录结构。**时间来自片段自己，不是来自它放在哪个目录** —— 目录名只是存放位置的划分，真正的时间戳在文件名里。
