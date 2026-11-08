@@ -1,0 +1,85 @@
+# Lookcam · NAS 部署（不需要源码，直接拉镜像）
+#
+# ── 用法 ────────────────────────────────────────────────────────────
+#   1. 在 NAS 上建一个目录，例如 /volume1/docker/lookcam
+#   2. 把本文件和同目录的 .env.example 拷进去，后者改名为 .env 并填两个路径
+#        /volume1/docker/lookcam/
+#          ├── docker-compose.yml   ← 本文件（保持这个名字，就不用加 -f）
+#          └── .env
+#   3. cd /volume1/docker/lookcam
+#      docker compose pull
+#      docker compose up -d
+#   4. 浏览器打开 http://<NAS 的 IP>:8420
+#
+#   老版本只有 docker-compose（中间有横线）时，把上面两条命令换成：
+#      docker-compose pull && docker-compose up -d
+#
+# ── 在 NAS 的图形界面里粘贴（群晖 Container Manager / 绿联 / 威联通）──
+#   图形界面通常不读 .env，会把 ${...} 当成普通字符串。粘贴前把两处
+#     ${WATCH_DIR_HOST:?...}  →  你的录像目录绝对路径
+#     ${DATA_DIR_HOST:?...}   →  你的数据目录绝对路径
+#   直接替换掉，其余 ${PORT:-8420} / ${TZ:-Asia/Shanghai} /
+#   ${LOOKCAM_IMAGE:-...} 按需要写成字面值 8420 / Asia/Shanghai /
+#   ghcr.io/caicaiks/lookcam:latest 即可。
+#
+# ── 和仓库根目录那个 docker-compose.yml 的区别 ──────────────────────
+#   根目录那份带 build: ./app，必须在 NAS 上放整套源码现场编译。
+#   这份只有 image，NAS 上留两个文件就能跑，也不用装 Node。
+#   镜像是双架构（linux/amd64 + linux/arm64），Docker 会按 CPU 自动选，
+#   x86_64 的 NAS 和 arm64 的 NAS 都不用改配置。
+#
+# ── 拉不动 ghcr.io 时 ───────────────────────────────────────────────
+#   用仓库里的 build-image.sh 在本机导出 tar.gz，传到 NAS 后
+#     docker load -i lookcam-linux-amd64.tar.gz
+#   再在 .env 里写 LOOKCAM_IMAGE=lookcam:latest（脚本导出的镜像名），
+#   然后 docker compose up -d，就不会去仓库拉了。
+
+services:
+  lookcam:
+    # 默认拉公开镜像；想锁版本就把 .env 里设成 :sha-<commit> 等具体标签
+    image: "${LOOKCAM_IMAGE:-ghcr.io/caicaiks/lookcam:latest}"
+    # 同一台 NAS 上要跑第二个实例（比如两台摄像头分开看）时删掉这行，
+    # 否则容器名会冲突；两个实例的 DATA_DIR_HOST 也要分开。
+    container_name: lookcam
+    restart: unless-stopped
+
+    # 容器里 PORT 环境变量决定监听端口，所以内外都用同一个数字。
+    # 只想在 NAS 本机访问时，改成 "127.0.0.1:${PORT:-8420}:${PORT:-8420}"
+    ports:
+      - "${PORT:-8420}:${PORT:-8420}"
+
+    environment:
+      # 时区决定每段录像归到哪一天，第一次启动前定好，之后别改
+      TZ: "${TZ:-Asia/Shanghai}"
+      # 下面两个是容器内路径，由 volumes 映射进来，不要改
+      WATCH_DIR: /media/rec
+      DATA_DIR: /data
+      # 端口在设置页也能改；那边的值存进 settings.json，优先于这里的默认值
+      PORT: "${PORT:-8420}"
+
+    volumes:
+      # 录像目录：本地目录绑定挂载，只读。容器永远不往里写。
+      # 这里不涉及 SMB —— NAS 上读的是自己的本地盘。
+      - "${WATCH_DIR_HOST:?请在 .env 里设置 WATCH_DIR_HOST}:/media/rec:ro"
+      # 索引、缩略图缓存、settings.json 都落在这里，重启容器不丢
+      - "${DATA_DIR_HOST:?请在 .env 里设置 DATA_DIR_HOST}:/data"
+
+    # 镜像以 node 用户（uid/gid 1000）运行。如果启动后日志出现
+    # [index] 保存失败 / EACCES，说明这个目录容器写不进去，在 NAS 上执行：
+    #   chown -R 1000:1000 /volume1/docker/lookcam
+    # 实在不想折腾权限，也可以取消下面这行注释（用 root 跑，安全性差一些）：
+    # user: "0:0"
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-8420}/api/status"]
+      interval: 30s
+      timeout: 4s
+      retries: 3
+      start_period: 20s
+
+    # NAS 的系统盘通常不大，别让日志无限涨
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

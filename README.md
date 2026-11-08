@@ -80,6 +80,27 @@ The first launch scans everything in the background — the UI stays usable, wit
 
 > **Which browser?** This footage is almost always H.265 (HEVC). **Safari and Chrome on macOS play it; Firefox does not.** The page probes codec support on load and shows a banner when it's missing, rather than leaving you staring at a black rectangle. See [Codec notes](#codec-notes).
 
+### Easiest path: just two files on the NAS (recommended)
+
+The root `docker-compose.yml` has `build: ./app`, so it needs the whole source tree on the NAS. If you just want to run the app, you don't need that: [`nas/docker-compose.yml`](nas/docker-compose.yml) + [`nas/.env.example`](nas/.env.example) are enough — the image is pulled from GHCR and the NAS needs no Node toolchain.
+
+```bash
+# on the NAS
+mkdir -p /volume1/docker/lookcam && cd /volume1/docker/lookcam
+# copy those two files here, rename .env.example to .env, fill in the two paths
+docker compose pull
+docker compose up -d
+```
+
+The image is a multi-arch manifest (`linux/amd64` + `linux/arm64`); Docker picks the right one for your NAS CPU, no `--platform` needed. Only `WATCH_DIR_HOST` (footage) and `DATA_DIR_HOST` (index) are required in `.env` — port, timezone and image tag are optional.
+
+A few NAS-specific gotchas:
+
+- **Don't copy your laptop's `data/` directory over.** Its `settings.json` points at a local debug mount, so the NAS would find no footage. Leave the data directory empty; the first boot builds its own index.
+- The container runs as `uid 1000`. If logs show `EACCES` or `[index] 保存失败`, run `chown -R 1000:1000 <DATA_DIR_HOST>` on the NAS. A commented-out `user: "0:0"` fallback is in the file.
+- Pasting into a NAS GUI (Synology Container Manager, UGREEN, QNAP) usually means `.env` is ignored — replace the two `${...}` paths with real ones. The substitution list is in the file header.
+- If `ghcr.io` is unreachable, build a tarball with `build-image.sh`, `docker load` it on the NAS, and point `LOOKCAM_IMAGE` in `.env` at that local image name.
+
 ### Rather not build on the NAS?
 
 If your NAS is slow, or can't reach an image registry, build the image somewhere else and ship it over. **The one thing you can't skip: build for the NAS's architecture.**

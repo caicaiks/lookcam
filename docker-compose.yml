@@ -1,5 +1,6 @@
 services:
   lookcam:
+    # 这份要源码现场构建。只想部署、不想拷整个仓库的话，用 nas/docker-compose.yml
     build:
       context: ./app
     # 默认用本地构建的镜像；想从仓库拉取时，在 .env 里设

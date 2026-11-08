@@ -80,6 +80,31 @@ docker compose up -d --build
 
 > **用什么浏览器看** —— 这类录像基本是 H.265（HEVC）编码，**Safari 和 macOS 上的 Chrome 能直接放，Firefox 放不了**。页面会先做能力检测，不支持时顶一条提示条，不会让你对着黑屏猜。详见下文[编码](#编码-h265-与-g711)一节。
 
+### 最省事：只拷两个文件到 NAS（推荐）
+
+根目录的 `docker-compose.yml` 带 `build: ./app`，要在 NAS 上放整套源码现场编译。
+只是想用的话不必如此：[`nas/docker-compose.yml`](nas/docker-compose.yml) +
+[`nas/.env.example`](nas/.env.example) 两个文件就够了，镜像直接从 GHCR 拉，NAS 上不用装 Node。
+
+```bash
+# 在 NAS 上
+mkdir -p /volume1/docker/lookcam && cd /volume1/docker/lookcam
+# 把上面两个文件拷进来，.env.example 改名 .env，填两个路径
+docker compose pull
+docker compose up -d
+```
+
+镜像是 `linux/amd64` + `linux/arm64` 双架构，Docker 会按 NAS 的 CPU 自动选，不用手动指定平台。
+`.env` 里必填的只有 `WATCH_DIR_HOST`（录像目录）和 `DATA_DIR_HOST`（索引存放处），
+端口、时区、镜像标签都是可选项。
+
+NAS 上几个容易踩的坑：
+
+- **别把电脑上的 `data/` 目录拷过去** —— 里面的 `settings.json` 记着本机调试用的挂载路径，会让 NAS 扫不到录像。数据目录留空，首次启动会自己建索引。
+- 容器以 `uid 1000` 运行。日志若出现 `EACCES` 或 `[index] 保存失败`，在 NAS 上执行 `chown -R 1000:1000 <DATA_DIR_HOST>`；文件里也留了 `user: "0:0"` 这条后路。
+- 在群晖 Container Manager / 绿联 / 威联通的图形界面里粘贴时，界面通常不读 `.env`，要把两处 `${...}` 换成实际路径；替换清单写在文件头部注释里。
+- 拉不动 `ghcr.io` 时，用 `build-image.sh` 导出 tar.gz 传上去 `docker load`，再把 `.env` 的 `LOOKCAM_IMAGE` 改成本地镜像名。
+
 ### 不想在 NAS 上构建？本机打好再传上去
 
 NAS 性能弱、或者拉不动镜像仓库时，可以在本机构建、导出、再传上去。
