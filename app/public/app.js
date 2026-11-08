@@ -31,6 +31,7 @@ const fmtSize = (b) => {
 };
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
 const dayDate = (d) => new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
+const fmtDayCn = (d) => `${+d.slice(4, 6)} 月 ${+d.slice(6, 8)} 日`;
 
 /* ---------------- 状态 ---------------- */
 
@@ -48,6 +49,7 @@ const S = {
   skipGap: true,
   gapTh: 300,
   curIdx: -1,
+  curFile: '',       // 当前这一段对应的文件名，用来识别「这个 ended 是不是当前这段的」
   hourView: true,
   busy: false,
   settings: null,    // /api/settings 的结果
@@ -457,6 +459,7 @@ function playSegment(idx, autoplay = true) {
   if (idx < 0 || idx >= list.length) return;
   const seg = list[idx];
   S.curIdx = idx;
+  S.curFile = seg.name;
   S.playhead = seg.start;
 
   screenEl.classList.add('has-video');
@@ -495,6 +498,7 @@ function stopVideo() {
     video.load();
   } catch {}
   S.playing = false;
+  S.curFile = '';
   screenEl.classList.remove('has-video');
   updatePlayIcon();
   stopRaf();
@@ -523,6 +527,11 @@ video.addEventListener('pause', () => {
 });
 
 video.addEventListener('ended', () => {
+  // 只认「当前这一段」的结束事件：换源那一瞬间，上一段偶尔还会甩一个 ended 出来，
+  // 不挡住的话会连跳两段。
+  const m = /[?&]f=([^&]*)/.exec(video.currentSrc || '');
+  const name = m ? decodeURIComponent(m[1]) : '';
+  if (!name || name !== S.curFile) return;
   nextSegment(true);
 });
 
@@ -719,8 +728,10 @@ function nextSegment(auto) {
   const i = S.curIdx;
   if (i < 0) return playSegment(firstIdxAtOrAfter(S.playhead));
   if (i + 1 >= list.length) {
-    toast('已经是当天最后一段');
-    video.pause();
+    // 当天播完了。原来这里是 toast + pause，停在最后那一帧上；
+    // 用户此时按播放键就从这一段开头重来，看起来就是「只会重播」。
+    // 改成接着播下一个有录像的日期，跟「自动播放下一段」的预期一致。
+    rollToNextDay(auto);
     return;
   }
 
@@ -742,6 +753,22 @@ function nextSegment(auto) {
 
   if (auto && gap > 2) toast(`跳过空档 ${fmtDur(gap)}`);
   playSegment(i + 1);
+}
+
+/**
+ * 当天最后一段播完（或用户点「下一段」到底）之后，接到下一个有录像的日期。
+ * S.days 是按日期升序排的，里面只有「确实有片段」的天，所以不会落到空日期上。
+ */
+function rollToNextDay(auto) {
+  const at = S.days.findIndex((d) => d.day === S.day);
+  const next = at >= 0 ? S.days[at + 1] : null;
+  if (!next) {
+    toast('已经是最后一天有录像的日期');
+    video.pause();
+    return;
+  }
+  toast(`${auto ? '连播到' : '跳到'} ${fmtDayCn(next.day)}`);
+  selectDay(next.day, { play: true }).catch(() => {});
 }
 
 function animatePlayhead(from, to, ms) {
