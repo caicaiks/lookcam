@@ -80,6 +80,42 @@ The first launch scans everything in the background — the UI stays usable, wit
 
 > **Which browser?** This footage is almost always H.265 (HEVC). **Safari and Chrome on macOS play it; Firefox does not.** The page probes codec support on load and shows a banner when it's missing, rather than leaving you staring at a black rectangle. See [Codec notes](#codec-notes).
 
+### Rather not build on the NAS?
+
+If your NAS is slow, or can't reach an image registry, build the image somewhere else and ship it over. **The one thing you can't skip: build for the NAS's architecture.**
+
+Most Macs (especially Apple Silicon) are arm64; most NAS boxes are x86_64. An image built for the host architecture will fail on the NAS with `exec format error`.
+
+Check the NAS first:
+
+```bash
+ssh <nas> uname -m
+# x86_64  → linux/amd64 (most NAS boxes)
+# aarch64 → linux/arm64
+```
+
+Then, on your machine:
+
+```bash
+./build-image.sh                      # defaults to linux/amd64
+TARGET=linux/arm64 ./build-image.sh   # if your NAS is ARM
+```
+
+The script builds, **verifies the resulting architecture**, and writes `lookcam-linux-amd64.tar.gz`. Then:
+
+```bash
+scp lookcam-linux-amd64.tar.gz <nas>:/volume1/docker/
+ssh <nas> 'docker load < /volume1/docker/lookcam-linux-amd64.tar.gz'
+docker compose up -d --no-build
+```
+
+Don't drop `--no-build`: without it, Compose sees the `build:` section and tries to rebuild on the NAS — where there's no source tree, and possibly no network.
+
+Updating later is the same loop: rerun the script → copy → load → up.
+
+> You need a working Docker engine and the buildx plugin locally (Docker Desktop, OrbStack, or colima). Cross-architecture builds run under QEMU emulation, so they're slower than native — and you may need to install binfmt once:
+> `docker run --privileged --rm tonistiigi/binfmt --install amd64`
+
 ## Where your footage can live
 
 The scanner makes no assumptions about directory layout. **Time comes from the clip itself, not from where it's stored** — the folder name is just how files are grouped; the real timestamp is in the filename.

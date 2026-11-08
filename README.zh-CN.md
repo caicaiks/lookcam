@@ -80,6 +80,43 @@ docker compose up -d --build
 
 > **用什么浏览器看** —— 这类录像基本是 H.265（HEVC）编码，**Safari 和 macOS 上的 Chrome 能直接放，Firefox 放不了**。页面会先做能力检测，不支持时顶一条提示条，不会让你对着黑屏猜。详见下文[编码](#编码-h265-与-g711)一节。
 
+### 不想在 NAS 上构建？本机打好再传上去
+
+NAS 性能弱、或者拉不动镜像仓库时，可以在本机构建、导出、再传上去。
+**只有一步不能省：必须按 NAS 的架构构建。**
+
+Mac（尤其 Apple Silicon）是 arm64，绝大多数 NAS 是 x86_64。按本机架构打出来的镜像拷过去，启动时会直接 `exec format error`。
+
+先在 NAS 上确认：
+
+```bash
+ssh <nas> uname -m
+# x86_64  → linux/amd64（大多数 NAS）
+# aarch64 → linux/arm64
+```
+
+然后在本机：
+
+```bash
+./build-image.sh                      # 默认 linux/amd64
+TARGET=linux/arm64 ./build-image.sh   # NAS 是 ARM 的话
+```
+
+脚本会构建、**核对产物架构**、导出成 `lookcam-linux-amd64.tar.gz`。接着：
+
+```bash
+scp lookcam-linux-amd64.tar.gz <nas>:/volume1/docker/
+ssh <nas> 'docker load < /volume1/docker/lookcam-linux-amd64.tar.gz'
+docker compose up -d --no-build
+```
+
+`--no-build` 别省：不加的话 compose 看到 `build:` 段落会尝试在 NAS 上重新构建，而 NAS 上既没有源码，也不一定有网络。
+
+以后更新代码就是「重跑脚本 → 传 → load → up」。
+
+> 本机需要有可用的 Docker 引擎和 buildx 插件（Docker Desktop / OrbStack / colima 任一）。跨架构构建走 QEMU 模拟，会比原生慢，第一次还可能要先装 binfmt：
+> `docker run --privileged --rm tonistiigi/binfmt --install amd64`
+
 ## 录像放哪都行
 
 扫描器不假设目录结构。**时间来自片段自己，不是来自它放在哪个目录** —— 目录名只是存放位置的划分，真正的时间戳在文件名里。

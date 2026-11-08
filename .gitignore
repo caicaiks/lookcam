@@ -16,3 +16,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# build-image.sh 的产物（几百 MB，别进仓库）
+lookcam-*.tar.gz
