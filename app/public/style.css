@@ -586,6 +586,25 @@ main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;backg
   content:'';position:absolute;inset:0;z-index:7;
   background:rgba(6,9,13,.35) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23FF6900' stroke-width='3'%3E%3Ccircle cx='19' cy='19' r='15' stroke-opacity='.18'/%3E%3Cpath d='M19 4a15 15 0 0 1 15 15'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 19 19' to='360 19 19' dur='.9s' repeatCount='indefinite'/%3E%3C/path%3E%3C/g%3E%3C/svg%3E") center no-repeat;
 }
+/* 加载得有个终点：文件没了/解不了码时给明确原因和操作，别一直转圈 */
+.screen .loaderr[hidden]{display:none}
+.screen .loaderr{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:8;
+  width:min(78%,420px);padding:16px 18px;text-align:center;
+  background:rgba(14,20,28,.94);border:1px solid rgba(255,105,0,.32);
+  border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.42);
+  color:#DCE5EE;font-size:11.5px;line-height:1.7;
+}
+.screen .loaderr .t{font-size:13px;font-weight:600;color:#FF9A55;margin-bottom:6px}
+.screen .loaderr .f{font-family:var(--mono);font-size:10.5px;color:#93A5B7;word-break:break-all;margin-bottom:8px}
+.screen .loaderr .d{color:#A9B7C6}
+.screen .loaderr .acts{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.screen .loaderr .acts button{
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.07);
+  color:#E6EDF4;font-family:var(--sans);font-size:11.5px;
+  padding:6px 12px;border-radius:8px;cursor:pointer;transition:.15s;
+}
+.screen .loaderr .acts button:hover{background:rgba(255,105,0,.18);border-color:rgba(255,105,0,.5)}
 .idx .ok.bad{background:#EF4444}
 .idx .ok.warn{background:#F59E0B}
 .scan-btn{width:100%;margin-top:4px}

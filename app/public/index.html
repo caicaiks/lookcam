@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lookcam · 监控回看</title>
-<link rel="stylesheet" href="/style.css?v=3">
+<link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
 
@@ -70,6 +70,15 @@
             <div class="gapmsg" id="gapMsg">
               <div class="big" id="gapDur">00:00</div>
               <div class="sm">该时段无录像</div>
+            </div>
+            <div class="loaderr" id="loadErr" hidden>
+              <div class="t">视频加载失败</div>
+              <div class="f" id="loadErrFile">—</div>
+              <div class="d">文件可能已被移走、目录暂时不可读，或浏览器不支持 H.265。</div>
+              <div class="acts">
+                <button id="loadErrRetry">重试这一段</button>
+                <button id="loadErrSkip">跳到下一段</button>
+              </div>
             </div>
           </div>
 
@@ -223,6 +232,6 @@
 <div class="toast" id="toast"></div>
 <div class="tip" id="tip"></div>
 
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 </body>
 </html>

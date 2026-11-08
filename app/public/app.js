@@ -292,8 +292,16 @@ function renderPlayer() {
   // 「在播哪一段」以 playSegment 设下的下标为准，不要每次都拿 playhead 反查。
   // 反查在区间重叠时会命中前一段，把 S.curIdx 改小一格；段末 nextSegment 按它 +1，
   // 就会把同一段又播一遍 —— 表现成「一直在重播这一段」。
-  let idx = S.curIdx;
-  if (!(idx >= 0 && idx < list.length)) idx = lastIdxCovering(S.playhead);
+  //
+  // 这里只用局部变量 idx 决定「右侧卡片显示哪一段」，绝不回写 S.curIdx。
+  // 回写过一次就出过大事：刚选完日期时 stopVideo() 把 src 清了、curIdx=-1，
+  // renderAll() 走到这里却按 playhead 算出 0 并写回去；接着用户点播放，
+  // togglePlay() 看见 curIdx>=0，以为片源已经就绪，只对空 video 调 play()，
+  // 于是零个请求、画面永远转圈，右侧还煞有介事地显示「序号 1 / 135」。
+  // 只有 playSegment() / stopVideo() 能改这个状态。
+  const idx = S.curIdx >= 0 && S.curIdx < list.length
+    ? S.curIdx
+    : lastIdxCovering(S.playhead);
   const seg = idx >= 0 ? list[idx] : null;
 
   if (seg) {
@@ -309,13 +317,11 @@ function renderPlayer() {
     $('#pGap').textContent =
       gap == null ? '—' : gap < -0.5 ? `重叠 ${fmtDur(-gap)}` : fmtDur(gap);
     if (seg.width && seg.height) $('#scrRes').textContent = `${seg.width}×${seg.height}`;
-    S.curIdx = idx;
   } else {
     $('#pTime').textContent = fmt(S.playhead);
     $('#pFile').textContent = list.length ? '无录像' : '该日没有录像';
     $('#pIdx').textContent = '—';
     $('#pSize').textContent = '—';
-    S.curIdx = -1;
   }
 
   document.querySelectorAll('.hcol').forEach((c) => {
@@ -462,6 +468,51 @@ function applySpeed() {
   if (el) el.textContent = S.speed + 'x';
 }
 
+/* 加载失败兜底：文件被移走、目录掉线、或者浏览器不认 H.265 时，
+   <video> 可能一直停在 loading。给一句明确的错误和「重试 / 跳过」，
+   别让用户对着转圈猜到底是哪一段没找到。 */
+const loadErrEl = $('#loadErr');
+let loadTimer = null;
+
+function clearLoadError() {
+  if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+  if (loadErrEl) loadErrEl.hidden = true;
+}
+
+function showLoadError(title) {
+  clearLoadError();
+  screenEl.classList.remove('loading');
+  const t = loadErrEl && loadErrEl.querySelector('.t');
+  if (t) t.textContent = title;
+  const f = $('#loadErrFile');
+  if (f) f.textContent = S.curFile || '—';
+  if (loadErrEl) loadErrEl.hidden = false;
+}
+
+function armLoadWatchdog(strict = false) {
+  if (loadTimer) clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => {
+    loadTimer = null;
+    if (!screenEl.classList.contains('loading')) return;
+    // 首次加载时「已经拿到数据、只是还没开始播」（例如自动播放被拦）不算失败；
+    // 但播放中途重新 waiting 是实打实的卡顿，这时不再放宽。
+    if (!strict && video.readyState >= 3) return;
+    showLoadError('视频加载超时');
+  }, 20000);
+}
+
+if (loadErrEl) {
+  $('#loadErrRetry').onclick = () => {
+    const i = S.curIdx;
+    clearLoadError();
+    playSegment(i >= 0 ? i : firstIdxAtOrAfter(S.playhead));
+  };
+  $('#loadErrSkip').onclick = () => {
+    clearLoadError();
+    nextSegment(true);
+  };
+}
+
 function playSegment(idx, autoplay = true) {
   const list = segs();
   if (idx < 0 || idx >= list.length) return;
@@ -470,6 +521,7 @@ function playSegment(idx, autoplay = true) {
   S.curFile = seg.name;
   S.playhead = seg.start;
 
+  clearLoadError();
   screenEl.classList.add('has-video');
   screenEl.classList.add('loading');
 
@@ -477,6 +529,7 @@ function playSegment(idx, autoplay = true) {
   video.load();
   applySpeed();          // load() 之后重新压一次速率
   video.addEventListener('loadedmetadata', applySpeed, { once: true });
+  armLoadWatchdog();
 
   if (autoplay) {
     const p = video.play();
@@ -505,9 +558,14 @@ function stopVideo() {
     video.removeAttribute('src');
     video.load();
   } catch {}
+  // 「没有在播任何东西」必须是一个唯一、可判断的状态：
+  // 否则 togglePlay() 会以为片源还在，直接对空 video 调 play()。
+  S.curIdx = -1;
   S.playing = false;
   S.curFile = '';
+  clearLoadError();
   screenEl.classList.remove('has-video');
+  screenEl.classList.remove('loading');
   updatePlayIcon();
   stopRaf();
   renderScrub();
@@ -515,17 +573,36 @@ function stopVideo() {
 
 video.addEventListener('playing', () => {
   S.playing = true;
+  clearLoadError();
   screenEl.classList.remove('loading');
   updatePlayIcon();
   startRaf();
 });
 
 video.addEventListener('waiting', () => {
+  // 换源/清空那一瞬间偶尔会甩一个迟到的 waiting 出来，别把转圈又挂回去
+  if (!video.getAttribute('src')) return;
   screenEl.classList.add('loading');
+  armLoadWatchdog(true);
 });
 
 video.addEventListener('canplay', () => {
+  clearLoadError();
   screenEl.classList.remove('loading');
+});
+
+video.addEventListener('error', () => {
+  const MSG = {
+    1: '加载被中止',
+    2: '网络错误，读不到文件',
+    3: '解码失败（浏览器不支持 H.265？）',
+    4: '文件不存在或格式不支持',
+  };
+  const code = video.error && video.error.code;
+  showLoadError(MSG[code] || '视频加载失败');
+  S.playing = false;
+  updatePlayIcon();
+  stopRaf();
 });
 
 video.addEventListener('pause', () => {
@@ -861,10 +938,16 @@ function togglePlay() {
   if (!segs().length) return toast('该日没有录像');
   if (S.playing) {
     video.pause();
-  } else {
-    if (S.curIdx < 0) playSegment(firstIdxAtOrAfter(S.playhead));
-    else video.play().catch(() => {});
+    return;
   }
+  // 不能只看 curIdx：切日期、切天后 stopVideo() 可能把 src 清空了。
+  // 真的没有片源时必须重新 playSegment()，否则只会对空 video 调 play()，
+  // 一个 /api/video 请求都不会发，画面就一直转圈。
+  if (S.curIdx < 0 || !video.getAttribute('src')) {
+    playSegment(firstIdxAtOrAfter(S.playhead));
+    return;
+  }
+  video.play().catch(() => {});
 }
 
 /* ---------------- 视图切换 ---------------- */
@@ -1417,7 +1500,7 @@ $('#drawerClose').onclick = () => $('#drawer').classList.remove('open');
 
 // 点击画面空白处暂停/播放
 $('#screen').addEventListener('click', (e) => {
-  if (e.target.closest('.gapmsg')) return;
+  if (e.target.closest('.gapmsg, .loaderr')) return;
   togglePlay();
 });
 
@@ -1640,6 +1723,21 @@ async function runSelfTest() {
       !!cleanRow && !cleanRow.classList.contains('dirty'),
       cleanRow ? `回到 ${cleanRow.querySelector('input').value}` : '无'
     );
+
+    // ---- 回归：选完日期再点「开始播放」，必须真的去加载视频 ----
+    // renderPlayer() 曾经把 curIdx 从 -1 回写成 0，togglePlay() 便误判
+    // 「已经在播」，只对空 <video> 调 play()：零请求、永远转圈，
+    // 右侧卡片还显示「序号 1 / 135」。这段专防它复发。
+    await selectDay(target, { play: false });
+    check('选完日期后 curIdx 保持 -1', S.curIdx === -1, `curIdx=${S.curIdx}`);
+    renderAll();
+    check('渲染不会伪造 curIdx', S.curIdx === -1, `curIdx=${S.curIdx}`);
+    check('切日期会清空视频源', !video.getAttribute('src'), `src=${video.getAttribute('src') || '(空)'}`);
+    togglePlay();
+    check('点播放会挂上视频源', !!video.getAttribute('src'), (video.getAttribute('src') || '').slice(0, 90));
+    check('点播放会定位到片段', S.curIdx >= 0, `第 ${S.curIdx + 1} 段`);
+    stopVideo();
+    check('停止后恢复未加载状态', S.curIdx === -1 && !video.getAttribute('src'));
 
     switchTab('timeline');
   } catch (e) {
