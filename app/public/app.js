@@ -289,7 +289,11 @@ function renderPlayhead() {
 
 function renderPlayer() {
   const list = segs();
-  const idx = list.findIndex((s) => S.playhead >= s.start && S.playhead < s.start + s.dur);
+  // 「在播哪一段」以 playSegment 设下的下标为准，不要每次都拿 playhead 反查。
+  // 反查在区间重叠时会命中前一段，把 S.curIdx 改小一格；段末 nextSegment 按它 +1，
+  // 就会把同一段又播一遍 —— 表现成「一直在重播这一段」。
+  let idx = S.curIdx;
+  if (!(idx >= 0 && idx < list.length)) idx = lastIdxCovering(S.playhead);
   const seg = idx >= 0 ? list[idx] : null;
 
   if (seg) {
@@ -299,7 +303,11 @@ function renderPlayer() {
     $('#pDur').textContent = `${Math.round(seg.dur)} 秒`;
     $('#pSize').textContent = fmtSize(seg.size);
     const prev = list[idx - 1];
-    $('#pGap').textContent = prev ? fmtDur(seg.start - (prev.start + prev.dur)) : '—';
+    // 间隔可能是负的：片段时长 60.1s，相邻两段有时只隔 57s，区间本来就重叠。
+    // 直接算会显示一个负的时长，改成直说「重叠 N 秒」。
+    const gap = prev ? seg.start - (prev.start + prev.dur) : null;
+    $('#pGap').textContent =
+      gap == null ? '—' : gap < -0.5 ? `重叠 ${fmtDur(-gap)}` : fmtDur(gap);
     if (seg.width && seg.height) $('#scrRes').textContent = `${seg.width}×${seg.height}`;
     S.curIdx = idx;
   } else {
@@ -795,17 +803,32 @@ function clearGapTimer() {
   hideGap();
 }
 
+/* 片段的区间是可能重叠的：dur 来自 mp4 头的 mvhd（实测 60.1 秒），
+   但相邻两段的起点有时只隔 57 秒。落在重叠区里的时间点，按「开始得更晚」的那段算，
+   因为人眼看到的是后一段。用 findIndex 从头找会命中前一段，正是这次死循环的来源。 */
+function lastIdxCovering(t) {
+  const list = segs();
+  let idx = -1;
+  for (let i = 0; i < list.length; i++) {
+    if (t >= list[i].start && t < list[i].start + list[i].dur) idx = i;
+  }
+  return idx;
+}
+
 function firstIdxAtOrAfter(t) {
   const list = segs();
-  const i = list.findIndex((s) => t < s.start + s.dur);
-  return i < 0 ? list.length - 1 : i;
+  if (!list.length) return -1;
+  const hit = lastIdxCovering(t);
+  if (hit >= 0) return hit;
+  const next = list.findIndex((s) => s.start >= t);
+  return next >= 0 ? next : list.length - 1;
 }
 
 function seekTo(t, autoplay = true) {
   const list = segs();
   if (!list.length) return;
   t = Math.max(0, Math.min(86399, t));
-  let idx = list.findIndex((s) => t >= s.start && t < s.start + s.dur);
+  let idx = lastIdxCovering(t);
   if (idx < 0) idx = list.findIndex((s) => s.start >= t);
   if (idx < 0) idx = list.length - 1;
   playSegment(idx, autoplay);
