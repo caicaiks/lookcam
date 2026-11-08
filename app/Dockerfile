@@ -1,4 +1,4 @@
-# 守夜 · 监控回看
+# Lookcam · 监控回看
 # 一个容器搞定：Node 服务 + ffmpeg 抽帧，零 npm 依赖
 
 FROM node:20-alpine

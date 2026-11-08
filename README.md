@@ -1,338 +1,288 @@
-# Lookcam · 监控回看
+# Lookcam
 
-给小米摄像头录像做的时间轴回看界面。跑在 NAS 的 Docker 里，浏览器打开就能按天、按小时、按事件段翻录像。
+A timeline for browsing fragmented security-camera footage — the clips your camera pushes to a NAS when it detects motion.
 
-> A timeline-based review UI for fragmented security-camera footage. Runs in Docker on your NAS — open a browser and browse by day, hour, or motion event.
+**Not a general-purpose NVR.** It does one thing: help you find those few minutes inside footage that covers only 8% of the day.
 
-不是通用 NVR —— 它只解决一件事：**在覆盖率只有 8% 的碎片录像里，快速定位到那几分钟。**
+English · [简体中文](README.zh-CN.md)
 
----
+![Timeline](docs/screenshot.png)
 
-## 它为什么长这样
-
-先说你数据的长相（实测，2026-08 到 2026-11，1,544 个小时目录，45 GB）：
-
-```
-<WATCH_DIR>/<设备ID>/YYYYMMDDHH/<分>M<秒>S_<unixts>.mp4
-例：a1b2c3d4e5f6/2026110815/01M10S_1794121270.mp4
-```
-
-（这只是我这台的布局。扫描器并不要求长这样 —— 见[录像目录怎么放](#录像目录怎么放)。）
-
-三个关键事实，决定了整个产品的形态：
-
-**1. 文件名前缀不是时长。**
-`54M50S_1793908490.mp4` 里的 `54M50S` 是「这个片段在 03 点这一小时内，从 54 分 50 秒开始」。真实时长每个都是 **60 秒**，靠读 mp4 头的 `mvhd` 拿（本项目自带解析器，不依赖 ffprobe）。
-
-**2. 60 秒碎片之间不是连续的。**
-11 月 6 日：122 个片段、有效画面 2.0 小时，散布在 21.7 小时里，只占全天 8%。平均每 10 分钟才有一分钟有画面。
-
-**3. 空档是双峰的。**
-一半空档小于 1 分钟（连续录制被切碎），四成超过 5 分钟（真的没人），最长一段 3.5 小时。所以需要「跳空档」和「事件合并阈值」两个开关，而不是一条匀速播放条。
-
-于是有了：
-
-- **两层时间轴** —— 24 小时柱状概览（看哪个时段有动静）+ 点开某个小时看一整条连续轨道（定位到具体哪一段）
-- **单段进度条** —— 视频下方一条可拖拽的进度条，专门对付这 60 秒：定位到第几秒、看还缓存了多少
-- **音量与静音** —— 录像带 G.711 音轨，滑块音量按 `M` 静音，设置记在本地
-- **默认 1x 原速 + 自动连播** —— 一段播完自动接下一段，空档默认略过（可关掉，改成按倍速「等」过去）；
-  当天播完接着下一个有录像的日期，不会停在最后一帧。要快进再点 2x / 4x / 8x
-- **事件段聚合** —— 把碎片按间隔合并成「一次活动」，阈值 1/2/5/10 分钟可切
-- **设置页** —— 扫描间隔、监控目录、并发数这些在界面上直接改，即时生效，不用重启容器
-
-两层的分工别搞混：**日时间轴负责「找到哪一段」，进度条负责「这一段里第几秒」。**
-
-![时间轴](docs/screenshot.png)
-
-*（视频区域是合成的示意图，不是真实画面。其余界面与数据来自一台真实运行的摄像头。）*
-
-![设置](docs/settings.png)
+*The video area is a synthetic placeholder, not real footage. Everything else — the UI and the data — comes from a camera that actually runs.*
 
 ---
 
-## 部署（任意支持 Docker 的 NAS）
+## Why this exists
 
-### 1. 确认宿主机路径
+A consumer camera doesn't record continuously. It records 60 seconds when something moves, then saves one file. One day of mine produced 122 of them:
 
-SSH 登进 NAS，确认录像目录的真实路径：
+| Metric | One of my days |
+|---|---|
+| Time with actual footage | 2.0 hours |
+| Span covered | 21.7 hours |
+| Share of the day | **8%** |
+| Average density | one minute of video every ten minutes |
+
+The gaps aren't evenly distributed either: half are under a minute (continuous recording, chopped up), 40% are over five minutes (nobody home), and the longest was 3.5 hours.
+
+So pointing a file manager at 122 files named `54M50S_1793908490.mp4` tells you nothing about which one has a person in it. This isn't a player — it's a **locator**:
+
+- **Two-tier timeline** — a 24-hour histogram shows which hours had activity; clicking one opens a continuous track for that hour, so you can land on a specific clip
+- **Gaps skipped by default** — clips are often tens of minutes apart, so waiting them out in real time is pointless. Turn it off if you want to watch them
+- **Event grouping** — consecutive fragments merge into a single "activity", with a threshold of 1/2/5/10 minutes
+
+> One detail that's easy to misread: in `54M50S_1793908490.mp4`, the `54M50S` prefix means *this clip starts at minute 54, second 50 of that hour*. It is **not** a duration. The real duration comes from the mp4 `mvhd` box — about 60 seconds each.
+
+## Features
+
+- **Two-tier timeline** plus a per-clip scrub bar that shows buffered range and is draggable
+- **Continuous playback** — a finished clip rolls into the next one, and the end of a day rolls into the next day that has footage
+- **Gap handling** — skip instantly, or "wait it out" at the current speed (capped at 20 seconds of wall time)
+- **Speed** 1× / 2× / 4× / 8×, **volume slider and mute**, volume remembered locally
+- **Keyboard** — `Space` play/pause, `←` `→` previous/next clip, `M` mute
+- **Settings page** — scan interval, watch directory, concurrency and more, editable at runtime without restarting the container
+- **Small** — zero npm dependencies; the index for 9,250 clips is a 1.1 MB JSON file
+
+## Quick start
+
+You need a NAS that can run Docker, and a footage directory the NAS can read.
+
+**1. Find the real path to your footage**
 
 ```bash
+ssh <your-nas>
 ls /volume1
-# 找到放监控的那个卷，然后：
 ls /volume1/Camera/xiaomi_camera_videos
 ```
 
-看到设备 ID 目录（一长串十六进制，比如 `a1b2c3d4e5f6`）就对了。
-**`WATCH_DIR_HOST` 要指到 `xiaomi_camera_videos` 这一层**，不是它的上一级。
+You should see a directory named with a long hex string (the device ID, e.g. `a1b2c3d4e5f6`). The path must point at `xiaomi_camera_videos` itself, not its parent.
 
-### 2. 配置
+**2. Set the two paths**
 
 ```bash
 cp .env.example .env
 ```
-
-编辑 `.env`，至少改这两行：
 
 ```ini
 WATCH_DIR_HOST=/volume1/Camera/xiaomi_camera_videos
 DATA_DIR_HOST=/volume1/docker/lookcam
 ```
 
-### 3. 启动
+**3. Start it**
 
 ```bash
 docker compose up -d --build
 ```
 
-或者把 `docker-compose.yml` 的内容直接粘进绿联 Docker 的「项目 / Compose」里创建。
+**4. Open** `http://<nas-ip>:8420`
 
-### 4. 打开
+The first launch scans everything in the background — the UI stays usable, with progress in the header. A full scan reads the head and tail of every file for its duration: measured at **~75 ms per file over an SMB mount**, so 9,000-odd files works out to **on the order of ten minutes**. Reading the NAS's local disk from inside the container is considerably faster.
 
-```
-http://<NAS的IP>:8420
-```
+> **Which browser?** This footage is almost always H.265 (HEVC). **Safari and Chrome on macOS play it; Firefox does not.** The page probes codec support on load and shows a banner when it's missing, rather than leaving you staring at a black rectangle. See [Codec notes](#codec-notes).
 
-首次启动会在后台全量扫描。实测 1,544 个目录扫完约 **5 分钟**（这个数字是在 SMB 挂载上测的；容器里直接读 NAS 本地盘会更快）。页面能正常打开，顶栏会显示「扫描中…」，扫完自动刷新。
+## Where your footage can live
 
----
+The scanner makes no assumptions about directory layout. **Time comes from the clip itself, not from where it's stored** — the folder name is just how files are grouped; the real timestamp is in the filename.
 
-## 录像目录怎么放
+Timestamps are resolved in this order, first match wins:
 
-上面写的是我这台小米的布局，但**扫描器不要求你长成这样**。
-
-关键点是：**时间来自片段自己，不是目录。** 所以目录只剩下一个职责 —— 当增量扫描的单位，这样每轮不用把所有文件重新 stat 一遍。命名和层级都不限，深度由「扫描深度」控制（默认 4 层）。
-
-时间戳按下面这个顺序认，命中即止：
-
-| 顺序 | 认什么 | 例子 |
+| # | Source | Example |
 |---|---|---|
-| 1 | 文件名尾部的 10 位 Unix 秒 | `54M50S_1793908490.mp4` |
-| 2 | 文件名里嵌的日历时间 | `20261108171234.mp4`、`2026-11-08_17-12-34.mp4`、`ch01_20261109100000.mp4` |
-| 3 | 目录名的 `YYYYMMDD[HH]` + 文件名前缀 `MMmSSs` | `2026081017/03M20S.mp4` |
-| 4 | 文件 mtime | 名字里完全不带时间的情况 |
+| 1 | 10-digit Unix seconds at the end of the filename | `54M50S_1793908490.mp4` |
+| 2 | A calendar timestamp embedded in the filename | `20261108171234.mp4`, `2026-11-08_17-12-34.mp4`, `ch01_20261109100000.mp4` |
+| 3 | `YYYYMMDD[HH]` in the directory name, plus an `MMmSSs` filename prefix | `2026081017/03M20S.mp4` |
+| 4 | File mtime | names carrying no time at all |
 
-这几种放法都能直接认，不用改配置：
+All of these work out of the box, with no configuration:
 
 ```
-<WATCH_DIR>/<设备ID>/YYYYMMDDHH/54M50S_1793908490.mp4   小米原样
-<WATCH_DIR>/2026-11-08/2026-11-08_17-12-34.mp4          按天分目录
-<WATCH_DIR>/cam/202611/09/ch01_20261109100000.mp4       年 / 月 / 日 + 品牌前缀
-<WATCH_DIR>/20261108171234.mp4                          全平铺
+<WATCH_DIR>/<device-id>/YYYYMMDDHH/54M50S_1793908490.mp4   Xiaomi, as-is
+<WATCH_DIR>/2026-11-08/2026-11-08_17-12-34.mp4             one folder per day
+<WATCH_DIR>/cam/202611/09/ch01_20261109100000.mp4          year / month / day + brand prefix
+<WATCH_DIR>/20261108171234.mp4                             completely flat
 ```
 
-两条行为值得知道：
+Two behaviours worth knowing:
 
-- **四层都推不出时间的文件会被跳过，不猜。** 日志里会写一行 `[scan] 时间来源：文件名 N / 目录 N / mtime N`，只有出现非文件名的来源或跳过时才打。日志里如果大量出现 `mtime`，说明你的命名不带时间，建议确认一下 —— 用 mtime 兜底的片段会按文件修改时间归日。
-- **归到哪一天只看片段自己的 ts，不看它在哪个目录。** 哪怕某段录像被放进了错的日期目录，时间轴也不会跟着错。
+- **Files that fail all four are skipped, not guessed at.** A scan logs `[scan] 时间来源：文件名 N / 目录 N / mtime N` — but only when a non-filename source was used or something was skipped. If `mtime` shows up in quantity, your filenames carry no time and you should double-check.
+- **A clip's day is derived from its own timestamp.** If a file sits in the wrong date folder, the timeline still gets it right.
 
----
+Directories have exactly one job left: being the **unit of incremental scanning**, so each pass doesn't have to `stat` every file again. How deep to descend is controlled by "scan depth" (default 4).
 
-## 配置
+## Configuration
 
-配置分两层，界线很清楚：**`.env` 管「容器怎么起来」，`settings.json` 管「服务怎么跑」。**
-除了下面这四项，其余全部在页面「设置」里改。
+Configuration has two layers, and the split is deliberate: **`.env` decides how the container comes up; `settings.json` decides how the service runs.**
 
-### 只能放在环境变量里的
+### Environment-only
 
-| 变量 | 默认值 | 为什么不能进 settings.json |
+| Variable | Default | Why it can't live in the settings page |
 |---|---|---|
-| `WATCH_DIR_HOST` | 必填 | docker 创建挂载前就得知道，那时候容器还没起来 |
-| `DATA_DIR_HOST` | 必填 | 同上；而且 `settings.json` 就住在这个目录里 |
-| `WATCH_DIR` | `/media/rec` | 容器内的挂载点，和 volumes 一一对应，不要改 |
-| `DATA_DIR` | `/data` | 同上。`settings.json` 已在其中，没法自己决定自己放哪 |
-| `TZ` | `Asia/Shanghai` | 决定每条录像归到哪一天。改了要重建索引，不适合放页面里随手改 |
+| `WATCH_DIR_HOST` | required | Docker needs it before creating the mount, when the container doesn't exist yet |
+| `DATA_DIR_HOST` | required | Same — and `settings.json` lives inside this directory |
+| `WATCH_DIR` | `/media/rec` | The mount point inside the container; it maps 1:1 to a volume, don't touch |
+| `DATA_DIR` | `/data` | Same. `settings.json` is already in there, so it can't decide its own location |
+| `TZ` | `Asia/Shanghai` | Determines which day each clip lands on. Changing it invalidates the index, so it doesn't belong in a UI you can poke at |
 
-`PORT` 也还认，但只作为**默认值**：设置页里改过就以那边为准。
+### Everything else lives in the settings page
 
-### 其余都在「设置」页
+`settings.json` stores only the values you explicitly changed. It **overrides the environment**, survives restarts, and is safe to hand-edit (`{"scanInterval": 10}`). Each value is validated on load; invalid ones are skipped and logged.
 
-`settings.json` 存的是用户显式改过的项，**优先级高于环境变量**，重启不丢。手写也行，格式就是 `{"scanInterval": 10}`，启动时逐项校验，非法值跳过并打日志。
-
-| 分类 | 可改项 |
+| Group | Editable |
 |---|---|
-| 监控与索引 | 监控目录、设备 ID、扫描间隔、扫描深度、启动时扫描 |
-| 扫描性能 | 目录并发、文件并发、读取真实时长、片段时长 |
-| 事件与缩略图 | 事件合并阈值、缩略图缓存上限、ffmpeg 路径 |
-| 服务 | 端口、监听地址（**改完要重启**） |
+| Monitoring & index | watch directory, device ID, scan depth, scan interval, scan on boot |
+| Scan performance | directory concurrency, file concurrency, read real duration, fallback duration |
+| Events & thumbnails | event merge threshold, thumbnail cache limit, ffmpeg path |
+| Service | port, bind address (**restart required**) |
 
-改动什么时候生效，界面上会直接说，不用猜：
+The UI tells you when each change takes effect:
 
-- 改**监控目录 / 设备 ID / 扫描深度 / 读取真实时长** → 立刻触发全量重扫（旧目录记录会在扫完后清掉）
-- 改**扫描间隔** → 立即重设定时器，`0` 就是关掉自动扫描
-- 改**并发数** → 下次扫描生效
-- 改**端口 / 监听地址** → 重启服务生效
-- 其余项下一次读取就生效
+- **Watch directory / device ID / scan depth / read real duration** → full rescan starts immediately (records for directories that no longer exist are pruned afterwards)
+- **Scan interval** → the timer is reset at once; `0` disables automatic scanning
+- **Concurrency** → applies on the next scan
+- **Port / bind address** → after a service restart
 
-每项旁边的「重置」会删掉本地值，回到环境变量给的默认值；带「已修改」标记的就是被覆盖过的项。
+"Reset" next to a row drops the local value and falls back to the environment default; rows tagged "modified" are the overridden ones.
 
-> 端口放在设置里有个代价：填错了服务会起不来。所以绑定失败时日志会直接告诉你改哪个文件，不会只抛一个 `EADDRINUSE`。
+> Putting the port in the settings page has one cost: get it wrong and the service won't start. So a failed bind prints exactly which file to edit instead of just throwing `EADDRINUSE`.
 
----
+## How it works
 
-## 索引与扫描
+- The index lives in `DATA_DIR/index.json`. In memory it's a Map and queries are plain iteration — 20k clips a year is a few MB, so a database would be dead weight
+- **First run** scans everything, reading a few dozen KB from the head and tail of each file to get its duration
+- **After that** it's incremental: new directories are always scanned; ones whose name says today or yesterday are rescanned; ones with no date in the name (flat layouts, month buckets) are compared by directory mtime; everything else is skipped without even a `stat`
+- Durations already probed are reused when the filename and file size are unchanged
+- **Full rescan** (the "scan now" button) also prunes records for footage that's gone from disk. It takes minutes, so the endpoint fires and returns, and the UI polls for status
+- A corrupt index is backed up as `index.json.bad.<timestamp>` before being rebuilt — never silently discarded
 
-- 索引落在 `DATA_DIR/index.json`，内存里是 Map，查询是纯遍历 —— 一年两万多条也就几 MB，没必要上数据库
-- **首次**：全量扫所有目录，每个文件读头尾各几十 KB 拿时长
-- **之后**：每 5 分钟只重扫「今天 + 昨天」的目录，以及新出现的目录；已探测过的时长按「文件名 + 文件大小」复用，不会重复读
-- **全量重扫**（设置页的「立即扫描」，或「运行状态」抽屉里）：会顺带清掉磁盘上已经消失的录像记录。这个动作要几分钟，所以走的是「点火即返回 + 轮询状态」，不会把请求吊在那里
-- 索引损坏会先备份成 `index.json.bad.<时间戳>` 再重建，不会静默丢数据
+**The footage directory is mounted read-only.** Everything written, thumbnails included, goes to `DATA_DIR`. Your camera's folder is never touched, and the NAS sync job never gets pulled into a loop.
 
-**容器对录像目录是只读挂载**，包括缩略图在内的一切写入都落在 `DATA_DIR`，不会碰你的监控目录，也不会触发同步任务的循环。
+## HTTP API
 
----
-
-## API
-
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/api/status` | 索引状态、容量、扫描进度、运行环境 |
-| GET | `/api/days` | 所有有录像的日期及每天汇总 |
-| GET | `/api/day?date=20261106&gap=300` | 当天片段列表 + 事件段 + 统计 |
-| POST | `/api/scan?full=1` | 触发扫描（`full=1` 全量），同步返回结果 |
-| POST | `/api/scan?full=1&async=1` | 只点火不等结果，立刻返回 `202` |
-| GET | `/api/settings` | 可改项（含类型/范围/当前值/是否被覆盖）+ 只读项 |
-| POST | `/api/settings` | `{"scanInterval":10}`，全部校验通过才落盘，返回最新全量配置 |
-| POST | `/api/settings/reset` | `{"key":"scanInterval"}`，恢复为环境变量默认值 |
-| GET | `/api/video?d=&k=&f=` | 视频流，支持 `Range`，可拖动 |
-| GET | `/api/thumb?d=&k=&f=` | 片段缩略图（ffmpeg 抽帧，磁盘缓存） |
+| GET | `/api/status` | Index state, storage used, scan progress, runtime info |
+| GET | `/api/days` | Every day with footage, plus per-day totals |
+| GET | `/api/day?date=20261106&gap=300` | Clips, merged events and stats for one day |
+| POST | `/api/scan?full=1` | Trigger a scan, returns when done |
+| POST | `/api/scan?full=1&async=1` | Fire and forget, returns `202` immediately |
+| GET | `/api/settings` | Editable fields (type/range/value/overridden) plus read-only ones |
+| POST | `/api/settings` | `{"scanInterval":10}` — written only if every field validates |
+| POST | `/api/settings/reset` | `{"key":"scanInterval"}` — back to the environment default |
+| GET | `/api/video?k=<relative-dir>&f=<filename>` | Video stream with `Range` support |
+| GET | `/api/thumb?k=<relative-dir>&f=<filename>` | Clip thumbnail (ffmpeg frame grab, disk-cached) |
 
-设置接口是**先全量校验再落盘**：一次提交里只要有一项非法，整批都不生效，返回 `400` 和具体原因（例如「扫描间隔 需要在 0 ~ 1440 之间」），不会出现改了一半的中间状态。
+`k` is the clip's directory relative to `WATCH_DIR` — it may be several levels deep, or empty if the clip sits at the root. `f` is the filename. Both are validated segment by segment, and the resolved absolute path must still fall inside `WATCH_DIR`.
 
-`d` = 设备 ID，`k` = `YYYYMMDDHH`，`f` = 文件名。三段都有严格字符校验，且拼出来的路径必须在 `WATCH_DIR` 之内。
+Settings writes are **validated as a batch before anything touches disk**: one invalid field rejects the whole request with `400` and a specific reason (e.g. "扫描间隔 需要在 0 ~ 1440 之间"). You never end up with half-applied settings.
 
----
+## Local development
 
-## 本地开发
-
-不需要 Docker，也不需要 `npm install`（零依赖）：
+No Docker, no `npm install` (zero dependencies), Node ≥ 18:
 
 ```bash
 cd app
 WATCH_DIR=/path/to/xiaomi_camera_videos DATA_DIR=/tmp/lookcam-data node server.js
 ```
 
-macOS 上如果 NAS 已经通过 SMB 挂载，把 `WATCH_DIR` 指到挂载点就行（比如 `/Volumes/你的共享名/xiaomi_camera_videos`）。
+On macOS, if the NAS is already mounted over SMB, just point `WATCH_DIR` at the mount (e.g. `/Volumes/<share>/xiaomi_camera_videos`).
 
-> 注意这只是**本地调试的取巧办法**。正式部署时容器直接读 NAS 上的本地目录，不经过 SMB —— 目录并发、扫描速度这些参数都是按本地盘给的参考值。
+> This is a **local debugging shortcut**. In production the container reads the NAS's local disk directly; the concurrency defaults are tuned for that.
 
-项目根目录有个 `start-local.sh`，把数据落在 `./data`，然后起在 8420。**它不含任何预设路径**，监控目录按下面的顺序找：
+`start-local.sh` in the project root keeps data under `./data` and listens on 8420. **It contains no hardcoded paths** — the watch directory is resolved in this order:
 
-1. `data/settings.json` 里的 `watchDir`（在「设置」页保存过就有）
-2. 环境变量 `WATCH_DIR`
-3. 都没有 → 打印用法后退出，不去猜
-
-所以第一次跑要带一次路径，之后在设置页里改就行：
+1. `watchDir` from `data/settings.json` (present if you've saved it in the settings page)
+2. the `WATCH_DIR` environment variable
+3. neither → print usage and exit; it won't guess
 
 ```bash
-# 第一次
-WATCH_DIR="/你的/录像目录" ./start-local.sh
+# first run
+WATCH_DIR="/your/footage/dir" ./start-local.sh
 
-# 之后（路径已经从设置页存进 data/settings.json）
+# afterwards (the path is now in data/settings.json)
 ./start-local.sh
 
-# 临时换端口
+# different port
 PORT=9000 ./start-local.sh
 ```
 
-扫描间隔、并发数这些也不再由这个脚本写死，统一在页面「设置」里调，改完即时生效。
+### Self-tests
 
-本机没装 `ffmpeg` 也能跑：`/api/thumb` 会返回 404，但**前端没有用到这个接口**，时间轴和回放完全不受影响。Docker 镜像里已经内置 ffmpeg。
+Add a query parameter to run checks in the browser. Results go into a hidden `<pre>`, so headless runners can dump them:
 
-### 两个自测入口
-
-页面加参数就能跑自检，结果写在隐藏的 `<pre>` 里，适合无头浏览器 dump：
-
-| 参数 | 干什么 |
-| --- | --- |
-| `?selftest=1` | 跑 28 项界面链路断言（索引、日历、时间轴、Range 请求、音量、设置页读写与重置等），标题会变成 `selftest 28/28` |
-| `?videotest=1` | 真的解一帧画到 canvas 上算亮度，用来区分「解码坏了」和「那一刻本来就暗」 |
-| `?debug=1` | 把 `video` 的 readyState/currentTime/duration/分辨率实时打到标题上 |
+| Parameter | What it does |
+|---|---|
+| `?selftest=1` | 28 UI-level assertions (index, calendar, timeline, `Range` requests, volume, settings read/write/reset). The title becomes `selftest 28/28` |
+| `?videotest=1` | Actually decodes a frame onto a canvas and measures brightness — separates "decoding is broken" from "that moment was genuinely dark" |
+| `?debug=1` | Mirrors `video` readyState / currentTime / duration / resolution into the title |
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --headless=new --no-sandbox --disable-gpu --user-data-dir=/tmp/cprof \
+  --headless=new --no-sandbox --user-data-dir=/tmp/cprof \
   --virtual-time-budget=20000 --dump-dom "http://127.0.0.1:8420/?selftest=1" \
   | grep -o 'selftest [0-9]*/[0-9]*'
 ```
 
-注意：**无头 Chrome 解不了 H.265**（见下节），所以 `videotest` 在无头下必然测出全黑；要测真实画面必须去掉 `--headless` 和 `--disable-gpu`。
+## Codec notes
 
----
+The footage is **H.265 / HEVC / Main / Level 5.0 / 8-bit 4:2:0 / 1920×1080** (no `avcC` box, only `hvcC`), and the audio track is **G.711 A-law** (`alaw`, not `mp4a`).
 
-## 编码：这批录像是 H.265 + G.711，不是 H.264 + AAC
+> A gotcha worth recording: I first looked for `mp4a` inside `moov`, concluded there was no audio track, and was wrong. The correct approach is to check `hdlr` for `soun` (is there an audio track at all), then read the `stsd` sample entry 4CC (what codec it uses). All 11 sampled files were `soun` + `alaw`.
 
-**视频**：实测 `avcC` 不存在，只有 `hvcC` —— **HEVC / Main profile / Level 5.0 / 8bit 4:2:0 / 1920×1080**。
+That determines which browsers can play it:
 
-**音频**：有音轨，但采样条目是 `alaw` 不是 `mp4a` —— **G.711 A-law，8bit，IP 摄像头常用的电话语音编码**。
-
-顺带记一笔踩坑：一开始只在 moov 里找 `mp4a`，没找到就判定「无音轨」，是错的。正确做法是找 `hdlr` 里的 `soun`（判断有没有音轨），再看 `stsd` 的 sample entry 4CC（判断用什么编码）。11 个抽样文件全部是 `soun` + `alaw`。
-
-这直接决定了「用什么浏览器看」：
-
-| 浏览器 | H.265 视频 | G.711 音频 |
-| --- | --- | --- |
-| Safari（macOS / iOS） | ✅ 系统硬解 | ✅ |
-| Chrome（macOS） | ✅ 走 VideoToolbox | ✅ 实测能解 |
-| Chrome（Windows） | ⚠️ 需装 HEVC 视频扩展 | ✅ |
+| Browser | H.265 video | G.711 audio |
+|---|---|---|
+| Safari (macOS / iOS) | ✅ hardware decode | ✅ |
+| Chrome (macOS) | ✅ via VideoToolbox | ✅ |
+| Chrome (Windows) | ⚠️ needs the HEVC Video Extension | ✅ |
 | Firefox | ❌ | ❌ |
-| 无头 Chrome | ❌ 拿不到硬解，`videoWidth` 恒为 0 | — |
+| Headless Chrome | ❌ no hardware decode, `videoWidth` stays 0 | — |
 
-音频能不能解，可以用这个字段确认（Chrome）：播放几秒后 `video.webkitAudioDecodedByteCount` 应大于 0，实测 3 秒解出 44160 字节。因为能解，音量条才是真能用的功能，不是摆设。
+To confirm audio is actually decoding in Chrome, play a few seconds and check that `video.webkitAudioDecodedByteCount` is above zero (44,160 bytes after 3 seconds in my test). It decodes — which is why the volume slider is a real control, not decoration.
 
-所以页面开头加了能力检测：`canPlayType('video/mp4; codecs="hvc1..."')` 为空就顶一条橙色提示条，直接告诉你换 Safari 或 Chrome，而不是让你对着黑屏猜。
+If you ever need to serve clients without H.265, ffmpeg is already in the image and could transcode to H.264 on the fly — at the cost of CPU. Not implemented; add it when there's demand.
 
-验证方法（不带 `--disable-gpu`）：
+## Troubleshooting
 
-```js
-const v = document.createElement('video');
-v.canPlayType('video/mp4; codecs="hvc1.1.6.L150.90"'); // "probably" = 能播
-```
+**`EACCES` on startup, or the index can't be written**
 
-如果以后要在不支持 H.265 的客户端上看，可以在容器里用 ffmpeg 转码成 H.264 再吐流（镜像里已有 ffmpeg），代价是吃 CPU —— 目前没做，按需再加。
-
----
-
-## 常见问题
-
-**启动后报 `EACCES` 或索引写不进去**
-
-容器里的进程是 `node` 用户（uid 1000），bind mount 的宿主机目录如果属主不同就写不了。在 NAS 上执行：
+The container runs as the `node` user (uid 1000). If the bind-mounted host directory belongs to someone else, it can't write:
 
 ```bash
 chown -R 1000:1000 /volume1/docker/lookcam
 ```
 
-群晖和绿联的第一个创建的用户通常就是 1000，一般不会遇到这个问题。
+The first user created on Synology and UGREEN NASes is usually 1000, so most people won't hit this.
 
-**页面打得开，但索引一直是空的**
-
-看容器日志：
+**The page loads but the index stays empty**
 
 ```bash
 docker logs -f lookcam
 ```
 
-正常会看到 `[scan] 全量：共 N 个目录，需扫 N 个`。如果直接报 `无法读取 WATCH_DIR`，说明 `.env` 里的 `WATCH_DIR_HOST` 路径不对 —— 它要指到 `xiaomi_camera_videos` 这一层。
+You should see `[scan] 全量：共 N 个目录，需扫 N 个`. If it reports `无法读取 WATCH_DIR`, the `WATCH_DIR_HOST` in `.env` is wrong — it must point at `xiaomi_camera_videos` itself.
 
-**时间对不上**
+**Timestamps are off**
 
-容器时区。确认 `.env` 里 `TZ=Asia/Shanghai`，且启动日志里 `[boot] 时区 Asia/Shanghai`。
+Check the container timezone: `TZ=Asia/Shanghai` in `.env`, and `[boot] 时区 Asia/Shanghai` in the startup log.
 
-**缩略图不显示**
+**Thumbnails don't appear**
 
-容器里 `ffmpeg` 没装上，或者 `THUMB_CACHE_MAX_MB` 已经写满。缩略图只是悬停预览用，不影响回放。
+Either ffmpeg is missing from the container or the thumbnail cache is full. Only the `?videotest=1` self-check uses thumbnails; the main UI doesn't depend on them, and playback is unaffected.
 
-**改了样式 / 脚本，刷新却没变化**
+**I changed the CSS/JS but the page looks the same**
 
-静态资源用 `no-cache` + `ETag`，正常刷新就会拿到最新的（未变更是 304，几乎不耗流量）。如果界面还是旧样子，多半是浏览器里留着更早版本的缓存 —— 按一次 `Cmd+Shift+R` 强制刷新。
+Static assets are served `no-cache` with an `ETag`, so a normal reload picks up changes (a 304 when nothing changed, costing almost nothing). If it still looks stale, the browser is holding an older copy — hit `Cmd+Shift+R` once.
 
----
+## Limitations
 
-## 已知限制
+- **No live view** — history only, no current feed
+- **No push notifications** — no motion alerts
+- **Chinese-only UI** — strings aren't internationalized yet
+- **H.265** — Firefox can't play it; Chrome on Windows needs the HEVC extension
+- **Multiple cameras share one timeline** — the index keeps them separate, but the frontend has no camera switcher yet
+- **The day timeline isn't draggable** — you navigate by clicking an hour column and then a clip on the track (the per-clip scrub bar *is* draggable)
 
-- **没有实时预览** —— 只看历史录像，不看当前画面
-- **没有推送** —— 不做移动侦测通知
-- **H.265 编码** —— Firefox 放不出来，Windows 的 Chrome 要装 HEVC 扩展；Safari 和 macOS 上的 Chrome 正常
-- 只支持小米这套 `MMmSSs_<ts>.mp4` 命名；别的摄像头要改 `lib/scanner.js` 里的 `SEG_NAME`
-- 多设备会全部混在一个时间轴里（索引里已按设备分开存，前端还没做切换）
-- 全天那条时间轴还不支持直接拖拽播放头，靠点柱子 + 点分钟格定位（单段进度条已可拖）
+## License
+
+[MIT](LICENSE)
