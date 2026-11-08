@@ -97,7 +97,7 @@ The image is a multi-arch manifest (`linux/amd64` + `linux/arm64`); Docker picks
 A few NAS-specific gotchas:
 
 - **Don't copy your laptop's `data/` directory over.** Its `settings.json` points at a local debug mount, so the NAS would find no footage. Leave the data directory empty; the first boot builds its own index.
-- The container runs as `uid 1000`. If logs show `EACCES` or `[index] 保存失败`, run `chown -R 1000:1000 <DATA_DIR_HOST>` on the NAS. A commented-out `user: "0:0"` fallback is in the file.
+- **It runs as root (`0:0`) by default.** The image's built-in `node` user is uid 1000, but NAS shared folders are usually owned by a different uid and often sit under a `700` parent — uid 1000 then fails with `EACCES: permission denied, scandir '/media/rec'`. The footage volume is mounted `:ro`, so the container can't modify it. To tighten this: run `ls -ln <footage-dir>` on the NAS, set `PUID` / `PGID` in `.env` to that owner, and `chown -R <PUID>:<PGID> <DATA_DIR_HOST>` so the data dir stays writable.
 - Pasting into a NAS GUI (Synology Container Manager, UGREEN, QNAP) usually means `.env` is ignored — replace the two `${...}` paths with real ones. The substitution list is in the file header.
 - If `ghcr.io` is unreachable, build a tarball with `build-image.sh`, `docker load` it on the NAS, and point `LOOKCAM_IMAGE` in `.env` at that local image name.
 

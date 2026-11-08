@@ -101,7 +101,7 @@ docker compose up -d
 NAS 上几个容易踩的坑：
 
 - **别把电脑上的 `data/` 目录拷过去** —— 里面的 `settings.json` 记着本机调试用的挂载路径，会让 NAS 扫不到录像。数据目录留空，首次启动会自己建索引。
-- 容器以 `uid 1000` 运行。日志若出现 `EACCES` 或 `[index] 保存失败`，在 NAS 上执行 `chown -R 1000:1000 <DATA_DIR_HOST>`；文件里也留了 `user: "0:0"` 这条后路。
+- **默认以 root（`0:0`）运行**。镜像自带的 `node` 用户是 uid 1000，而 NAS 共享文件夹的属主通常不是 1000、父目录还常是 700，用 1000 跑会在扫描时报 `EACCES: permission denied, scandir '/media/rec'`。录像目录是 `:ro` 挂载，容器改不了它。想收紧权限：在 NAS 上 `ls -ln <录像目录>` 查出属主数字，把 `.env` 的 `PUID` / `PGID` 填成它，并 `chown -R <PUID>:<PGID> <DATA_DIR_HOST>` 保证数据目录可写。
 - 在群晖 Container Manager / 绿联 / 威联通的图形界面里粘贴时，界面通常不读 `.env`，要把两处 `${...}` 换成实际路径；替换清单写在文件头部注释里。
 - 拉不动 `ghcr.io` 时，用 `build-image.sh` 导出 tar.gz 传上去 `docker load`，再把 `.env` 的 `LOOKCAM_IMAGE` 改成本地镜像名。
 

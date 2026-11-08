@@ -19,8 +19,8 @@
 #     ${WATCH_DIR_HOST:?...}  →  你的录像目录绝对路径
 #     ${DATA_DIR_HOST:?...}   →  你的数据目录绝对路径
 #   直接替换掉，其余 ${PORT:-8420} / ${TZ:-Asia/Shanghai} /
-#   ${LOOKCAM_IMAGE:-...} 按需要写成字面值 8420 / Asia/Shanghai /
-#   ghcr.io/caicaiks/lookcam:latest 即可。
+#   ${LOOKCAM_IMAGE:-...} / ${PUID:-0}:${PGID:-0} 按需要写成字面值
+#   8420 / Asia/Shanghai / ghcr.io/caicaiks/lookcam:latest / 0:0 即可。
 #
 # ── 和仓库根目录那个 docker-compose.yml 的区别 ──────────────────────
 #   根目录那份带 build: ./app，必须在 NAS 上放整套源码现场编译。
@@ -43,6 +43,17 @@ services:
     container_name: lookcam
     restart: unless-stopped
 
+    # ── 为什么默认用 root ──────────────────────────────────────────
+    # 镜像自带的 node 用户是 uid 1000，但 NAS 共享文件夹的属主通常不是
+    # 1000（绿联/群晖常见 root 或别的 uid），父目录还常常是 700。
+    # 用 1000 跑会在扫描器 readdir('/media/rec') 时直接
+    # EACCES: permission denied，页面顶栏显示「索引异常」。
+    # 录像目录是 :ro 挂载，容器不会改动它；根目录权限也不会被改。
+    #
+    # 想收紧：在 NAS 上执行 `ls -ln /volume1/Camera` 查出录像目录属主的
+    # uid/gid，把下面的值换成对应数字，或在 .env 里设 PUID / PGID。
+    user: "${PUID:-0}:${PGID:-0}"
+
     # 容器里 PORT 环境变量决定监听端口，所以内外都用同一个数字。
     # 只想在 NAS 本机访问时，改成 "127.0.0.1:${PORT:-8420}:${PORT:-8420}"
     ports:
@@ -64,11 +75,10 @@ services:
       # 索引、缩略图缓存、settings.json 都落在这里，重启容器不丢
       - "${DATA_DIR_HOST:?请在 .env 里设置 DATA_DIR_HOST}:/data"
 
-    # 镜像以 node 用户（uid/gid 1000）运行。如果启动后日志出现
-    # [index] 保存失败 / EACCES，说明这个目录容器写不进去，在 NAS 上执行：
-    #   chown -R 1000:1000 /volume1/docker/lookcam
-    # 实在不想折腾权限，也可以取消下面这行注释（用 root 跑，安全性差一些）：
-    # user: "0:0"
+    # 镜像以 root 跑（见上面的 user），所以上面的数据目录一般能直接写。
+    # 如果你把 PUID/PGID 改成了非 root，就要保证这个目录对该 uid 可写：
+    #   chown -R <PUID>:<PGID> /volume1/docker/lookcam
+    # 否则启动后日志会出现 [index] 保存失败 / EACCES。
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-8420}/api/status"]
