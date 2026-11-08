@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lookcam · 监控回看</title>
+<link rel="stylesheet" href="/style.css?v=3">
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="dot"></span>Lookcam<small>· 监控回看</small></div>
+  <nav>
+    <button data-tab="timeline" class="on">时间轴</button>
+    <button data-tab="events">事件</button>
+    <button data-tab="calendar">月历</button>
+    <button data-tab="settings">设置</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="idx" id="idxBox">
+    <span class="ok" id="idxDot"></span><span id="idxText">正在载入索引…</span>
+  </div>
+  <button class="ghost" id="btnDocs">运行状态</button>
+</header>
+
+<div class="warnbar" id="codecWarn" hidden>
+  当前浏览器不支持 H.265(HEVC) 视频解码，画面会是黑的。请改用 <b>Safari</b> 或 <b>Chrome</b> 打开本页。
+</div>
+
+<div class="wrap">
+  <aside>
+    <div class="scroll">
+      <div class="calhead">
+        <div class="m" id="calMonth">—</div>
+        <div class="nav2">
+          <button id="calPrev">‹</button>
+          <button id="calNext">›</button>
+        </div>
+      </div>
+      <div class="wd"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="grid" id="calGrid"></div>
+
+      <div class="sec">
+        <div class="sech"><h4>当日概况</h4><span id="dayTag"></span></div>
+        <div class="stats">
+          <div class="stat"><div class="v" id="stRec">—</div><div class="k">有效录像</div></div>
+          <div class="stat"><div class="v" id="stSpan">—</div><div class="k">时间跨度</div></div>
+          <div class="stat"><div class="v" id="stCov">—</div><div class="k">覆盖率</div></div>
+          <div class="stat"><div class="v" id="stSize">—</div><div class="k">容量</div></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sech"><h4>事件段</h4><span id="evCount"></span></div>
+        <div class="evlist" id="evMini"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="viewTimeline" class="view" style="display:flex;flex-direction:column;overflow:hidden;padding:0">
+      <div class="stage">
+        <div class="screencol">
+          <div class="screen" id="screen">
+            <video id="video" playsinline preload="auto"></video>
+            <div class="empty-hint" id="emptyHint">点击 ▶ 开始播放，或点时间轴上的柱子定位小时</div>
+            <div class="tl"><span class="r"></span><span id="scrTime">--:--:--</span></div>
+            <div class="date" id="scrDate">—</div>
+            <div class="br"><span id="scrRes">—</span> · HEVC · <span id="scrRate">1x</span></div>
+            <div class="gapmsg" id="gapMsg">
+              <div class="big" id="gapDur">00:00</div>
+              <div class="sm">该时段无录像</div>
+            </div>
+          </div>
+
+          <div class="scrub disabled" id="scrub">
+            <span class="sk-t" id="skCur">0:00</span>
+            <div class="sk-track" id="skTrack">
+              <i class="sk-buf" id="skBuf"></i>
+              <i class="sk-fill" id="skFill"></i>
+              <i class="sk-knob" id="skKnob"></i>
+              <span class="sk-tip" id="skTip">0:00</span>
+            </div>
+            <span class="sk-t dim" id="skDur">0:00</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="pcard">
+            <div class="lab">当前片段</div>
+            <div class="big" id="pTime">--:--:--</div>
+            <div class="sub" id="pFile">—</div>
+          </div>
+          <div class="pcard">
+            <div class="row"><span>序号</span><span id="pIdx">—</span></div>
+            <div class="row"><span>时长</span><span id="pDur">—</span></div>
+            <div class="row"><span>大小</span><span id="pSize">—</span></div>
+            <div class="row"><span>间隔</span><span id="pGap">—</span></div>
+          </div>
+          <div class="pcard" style="margin-top:auto">
+            <div class="lab">快捷键</div>
+            <div class="row" style="font-size:10.5px"><span>空格</span><span style="font-family:var(--sans)">播放/暂停</span></div>
+            <div class="row" style="font-size:10.5px"><span>← →</span><span style="font-family:var(--sans)">上/下一段</span></div>
+            <div class="row" style="font-size:10.5px"><span>点柱子</span><span style="font-family:var(--sans)">放大小时</span></div>
+            <div class="row" style="font-size:10.5px"><span>M</span><span style="font-family:var(--sans)">静音</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <button class="cbtn play" id="btnPlay">
+          <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="cbtn" id="btnPrev" title="上一段 (←)">
+          <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button class="cbtn" id="btnNext" title="下一段 (→)">
+          <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>
+        </button>
+        <div class="spd" id="spd">
+          <button data-s="1" class="on">1x</button><button data-s="2">2x</button>
+          <button data-s="4">4x</button><button data-s="8">8x</button>
+        </div>
+        <button class="cbtn on" id="btnSkip">
+          <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6zm10 0h2V6h-2z"/></svg>跳空档
+        </button>
+        <div class="vol" id="vol">
+          <button class="vbtn" id="volBtn" title="静音 (M)">
+            <svg id="icoVol" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 9.2v5.6h3.4L12.8 19V5L7.4 9.2H4z" fill="currentColor" stroke="none"/>
+              <path class="w1" d="M16.2 9.6a3.6 3.6 0 010 4.8"/>
+              <path class="w2" d="M18.7 7.3a7 7 0 010 9.4"/>
+              <path class="x" d="M16.2 9.7l4.6 4.6M20.8 9.7l-4.6 4.6"/>
+            </svg>
+          </button>
+          <input type="range" id="volRange" min="0" max="100" step="1" value="100" aria-label="音量">
+        </div>
+        <div class="spacer"></div>
+        <div class="ctxt"><b id="posTxt">00:00:00</b> / 24:00:00</div>
+      </div>
+
+      <div class="tlwrap">
+        <div class="tlhead">
+          <div class="l">
+            <b>全天分布</b>
+            <span style="font-size:10.5px;color:var(--dim2)">点击小时放大</span>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--sig)"></i>有录像</span>
+            <span><i style="background:var(--ink)"></i>播放头</span>
+            <span><i style="background:rgba(17,24,39,.10)"></i>无录像</span>
+          </div>
+        </div>
+        <div class="daybar" id="daybar">
+          <div class="ph" id="phDay" style="left:0"></div>
+        </div>
+
+        <div class="hourstrip" id="hourStrip">
+          <div class="hshead">
+            <div class="t"><b id="hsRange">00:00 – 00:59</b><span id="hsInfo"></span></div>
+            <button id="hsClose">收起</button>
+          </div>
+          <div class="hs-track" id="hsTrack">
+            <div class="hs-runs" id="hsRuns"></div>
+            <div class="ph" id="phHour" style="left:0"></div>
+            <div class="hs-tip" id="hsTip"></div>
+          </div>
+          <div class="minscale" id="minScale"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="viewEvents" class="view hide">
+      <div class="vhead">
+        <h2>事件段</h2>
+        <p>把碎片按间隔合并成一次活动</p>
+        <div class="spacer"></div>
+        <div class="spd" id="gapTh">
+          <button data-g="60">1 分钟</button>
+          <button data-g="120">2 分钟</button>
+          <button data-g="300" class="on">5 分钟</button>
+          <button data-g="600">10 分钟</button>
+        </div>
+      </div>
+      <div class="evgrid" id="evGrid"></div>
+    </div>
+
+    <div id="viewCalendar" class="view hide">
+      <div class="vhead">
+        <h2>录像密度</h2>
+        <p>颜色深浅 = 当天活跃小时数（满格 24 小时）</p>
+      </div>
+      <div class="calbig">
+        <div class="wk"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div class="days" id="calBig"></div>
+      </div>
+    </div>
+
+    <div id="viewSettings" class="view hide">
+      <div class="vhead">
+        <h2>设置</h2>
+        <p>改完立即生效，保存在数据目录的 <code>settings.json</code></p>
+        <div class="spacer"></div>
+        <button class="ghost" id="setScan">立即扫描</button>
+        <button class="ghost" id="setRefresh">重新读取</button>
+      </div>
+      <div class="setwrap" id="setWrap">
+        <div class="setempty">正在读取配置…</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="dh">
+    <h3>运行状态</h3>
+    <button class="ghost" id="drawerClose" style="padding:4px 10px">关闭</button>
+  </div>
+  <div class="db" id="drawerBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="tip" id="tip"></div>
+
+<script src="/app.js?v=3"></script>
+</body>
+</html>

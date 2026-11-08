@@ -1,0 +1,14 @@
+{
+  "name": "lookcam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "时间轴式监控回看服务：把碎片化的摄像头录像按天/小时/事件段翻查",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

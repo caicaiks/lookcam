@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.git
+.DS_Store
+data
+*.log
+README.md
+docker-compose.yml
+.env
+.env.example
