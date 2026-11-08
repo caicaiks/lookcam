@@ -41,6 +41,7 @@ So pointing a file manager at 122 files named `54M50S_1793908490.mp4` tells you 
 - **Speed** 1× / 2× / 4× / 8×, **volume slider and mute**, volume remembered locally
 - **Keyboard** — `Space` play/pause, `←` `→` previous/next clip, `M` mute
 - **Settings page** — scan interval, watch directory, concurrency and more, editable at runtime without restarting the container
+- **Mobile-friendly** — narrow screens switch to a vertically scrolling layout; the header, playback controls and charts reflow without horizontal overflow
 - **Small** — zero npm dependencies; the index for 9,250 clips is a 1.1 MB JSON file
 
 ## Quick start

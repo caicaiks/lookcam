@@ -380,6 +380,9 @@ main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;backg
 
 /* ---------- 事件视图 ---------- */
 .view{flex:1;overflow-y:auto;padding:20px 22px}
+/* 时间轴要「一屏排满」，和另外三个可滚动视图不同。
+   写成规则而不是行内样式，窄屏的媒体查询才覆盖得了 overflow。 */
+#viewTimeline{display:flex;flex-direction:column;overflow:hidden;padding:0}
 .vhead{display:flex;align-items:center;gap:12px;margin-bottom:18px}
 .vhead h2{font-size:17px;font-weight:600;letter-spacing:-.2px}
 .vhead p{font-size:12px;color:var(--dim2)}
@@ -608,3 +611,82 @@ main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;backg
 .idx .ok.bad{background:#EF4444}
 .idx .ok.warn{background:#F59E0B}
 .scan-btn{width:100%;margin-top:4px}
+
+/* ============================================================
+   手机 / 窄屏
+   桌面是「一屏塞满」的 flex 布局，直接搬到窄屏会横向溢出：
+   实测 390px 视口被撑到 489px，移动浏览器于是自动缩小整页
+   （所有字变小、右边留白），顶栏文字还被挤成竖排。
+   这里改成整页纵向滚动 + 顶栏折两行 + 控制条可换行。
+   ============================================================ */
+@media (max-width:700px){
+  html,body{height:auto;min-height:100%}
+  body{display:block;overflow-x:hidden;overflow-y:auto}
+  .warnbar{padding:8px 12px;font-size:11.5px}
+
+  /* 顶栏：品牌 / 索引状态一行，四个 tab 独占一行 */
+  header{height:auto;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 12px}
+  .brand{font-size:14px;flex-shrink:0;white-space:nowrap}
+  .brand small{display:none}
+  header .spacer{display:none}
+  .idx{
+    margin-left:auto;max-width:150px;padding:5px 8px;font-size:10.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;
+  }
+  .idx b{font-size:10px}
+  #btnDocs{padding:5px 8px;font-size:11px;white-space:nowrap;flex-shrink:0}
+  nav{order:5;flex:0 0 100%;width:100%;gap:2px}
+  nav button{flex:1;min-width:0;padding:8px 2px;font-size:12px;white-space:nowrap}
+
+  /* 主区不再 flex:1 撑满一屏，改成内容自然堆叠、整页滚动 */
+  .wrap{display:block}
+  main{display:block;overflow:visible}
+  #viewTimeline{overflow:visible}
+  .stage{display:block;padding:12px 12px 0}
+  .screencol{display:block}
+  .screen{border-width:4px;border-radius:12px}
+  .scrub{padding:8px 2px 0}
+
+  /* 桌面右侧的「当前片段」卡片挪到视频下方，横向紧凑排 */
+  .panel{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;width:auto;margin-top:10px}
+  .panel .pcard{flex:1 1 140px;min-width:0;margin:0;padding:9px 11px}
+  .panel .pcard .lab{margin-bottom:4px}
+  .panel .pcard .big{font-size:16px}
+  .panel .pcard .row{font-size:11px;padding:2px 0}
+  .panel .pcard:last-child{display:none}   /* 快捷键在触屏上没意义 */
+
+  /* 控制条允许换行，音量条收窄，别把时间挤到屏幕外 */
+  .ctrl{flex-wrap:wrap;gap:6px;padding:10px 12px}
+  .ctrl .spacer{display:none}
+  .ctxt{margin-left:auto;font-size:10.5px;white-space:nowrap}
+  .spd button{padding:5px 6px;font-size:10.5px}
+  #btnSkip{font-size:11px;padding:0 8px;white-space:nowrap}
+  #volRange{width:52px}
+  .vol{gap:2px}
+
+  /* 时间轴：24 个小时标签挤不下，隔一个显示 */
+  .tlwrap{padding:10px 12px 22px}
+  .tlhead{flex-wrap:wrap;gap:6px}
+  .legend{gap:8px;font-size:10px}
+  .daybar{height:74px;gap:2px;padding:5px 6px 17px}
+  .hcol .lb{font-size:8px}
+  .hcol:nth-child(even) .lb{display:none}
+  .hourstrip{padding:10px 12px 8px}
+  .minscale span:nth-child(even){display:none}
+
+  /* 另外三个视图 + 抽屉 */
+  .view{padding:14px 12px;overflow:visible}
+  .vhead{flex-wrap:wrap;gap:8px}
+  .evrow{gap:9px;padding:11px 12px}
+  .evrow .vis{width:90px}
+  /* 三项统计合不进一行就整体换行，别把「有效画面」这类词折成竖排 */
+  .evrow .meta{flex-wrap:wrap;gap:2px 10px}
+  .evrow .meta span{white-space:nowrap}
+  /* 卡片标题不许被说明文字挤到折字（「扫描性能」曾被拆成两行） */
+  .setcard>.ch{flex-wrap:wrap;gap:4px 10px}
+  .setcard>.ch h3{white-space:nowrap;flex-shrink:0}
+  .setrow{flex-wrap:wrap;gap:4px 10px;padding:11px 12px}
+  .setrow .sc{width:100%;justify-content:flex-end}
+  .fld.wide{width:100%}
+  .drawer{width:100%;max-width:100%}
+}

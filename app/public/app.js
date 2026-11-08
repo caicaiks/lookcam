@@ -753,17 +753,26 @@ video.addEventListener('durationchange', renderScrub);
    窗口够高时让播放器正好 16:9，不够高就退化为整宽 + 等比缩放，
    否则内容会溢出把底部时间轴裁掉（实测能裁掉 35px）。 */
 const SCRUB_H = 30;
-const SCREEN_BORDER = 12;            // .screen 的 6px 白边框 × 2
 
 function fitStage() {
   const col = document.querySelector('.screencol');
   if (!col) return;
   const availW = col.clientWidth;
   const availH = col.clientHeight - SCRUB_H;
-  if (availW < 80 || availH < 80) return;   // 视图被隐藏时不算
+  if (availW < 80) return;   // 视图被隐藏时不算
 
-  const ideal = ((availW - SCREEN_BORDER) * 9) / 16 + SCREEN_BORDER;
-  col.style.setProperty('--sh', Math.round(Math.min(availH, ideal)) + 'px');
+  // 边框宽度在窄屏 CSS 里会变，从实际样式读，别写死 12
+  const cs = getComputedStyle(screenEl);
+  const border = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+  const ideal = ((availW - border) * 9) / 16 + border;
+
+  // 桌面：一屏排满，高度不够就把画面等比缩小。
+  // 手机：整页改成纵向滚动，.screencol 的高度是内容自己撑出来的，
+  // 再拿 availH 去 min 会让画面塌缩，直接按宽度取 16:9。
+  const mobile = window.matchMedia('(max-width:700px)').matches;
+  if (!mobile && availH < 80) return;
+  const h = mobile ? ideal : Math.min(availH, ideal);
+  col.style.setProperty('--sh', Math.round(h) + 'px');
   renderScrub();
 }
 
