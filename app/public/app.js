@@ -438,8 +438,8 @@ function renderBigCal() {
 /* ---------------- 视频播放 ---------------- */
 
 function videoUrl(seg) {
-  const k = S.day + pad(seg.hour);
-  const q = new URLSearchParams({ d: seg.device || '', k, f: seg.name });
+  // k 就是这个片段所在的相对目录，直接用后端给的，不再由日期反推
+  const q = new URLSearchParams({ k: seg.dir || '', f: seg.name });
   return '/api/video?' + q.toString();
 }
 
@@ -840,7 +840,11 @@ function switchTab(t) {
    避免界面停在一个没存进去的假值上。 */
 
 const SET_GROUPS = [
-  { t: '监控与索引', d: '录像目录和扫描节奏', keys: ['watchDir', 'device', 'scanInterval', 'scanOnBoot'] },
+  {
+    t: '监控与索引',
+    d: '录像目录和扫描节奏',
+    keys: ['watchDir', 'device', 'scanDepth', 'scanInterval', 'scanOnBoot'],
+  },
   {
     t: '扫描性能',
     d: '并发不是越大越好：读本地盘可以高些，走网络挂载要低些',
@@ -1687,7 +1691,7 @@ async function runVideoTest() {
     log('判定', avg > 2 && lit / n > 0.02 ? '画面正常（有内容）' : '画面接近全黑');
 
     // 缩略图（ffmpeg 抽帧）链路
-    const tq = new URLSearchParams({ d: seg.device || '', k: S.day + pad(seg.hour), f: seg.name });
+    const tq = new URLSearchParams({ k: seg.dir || '', f: seg.name });
     const img = new Image();
     const thumbOk = await new Promise((res) => {
       img.onload = () => res(img.naturalWidth > 0);

@@ -30,12 +30,12 @@ const SCHEMA = {
   },
   watchDir: {
     label: '监控目录',
-    hint: '录像根目录，下面应当是 设备ID/YYYYMMDDHH 或直接 YYYYMMDDHH',
+    hint: '录像根目录。不限定目录结构，时间从文件名或目录名里的日期认',
     type: 'path',
   },
   device: {
     label: '设备 ID',
-    hint: '只索引这一台摄像头，留空表示全部',
+    hint: '只扫顶层这个子目录，用于多摄像头分开看，留空表示全部',
     type: 'text',
     pattern: /^[A-Za-z0-9_-]{0,64}$/,
     placeholder: '留空 = 全部设备',
@@ -63,6 +63,14 @@ const SCHEMA = {
     min: 1,
     max: 64,
     unit: '个',
+  },
+  scanDepth: {
+    label: '扫描深度',
+    hint: '从监控目录往下钻几层找 mp4。设备/YYYYMMDDHH 这种结构 2 层就够',
+    type: 'int',
+    min: 0,
+    max: 8,
+    unit: '层',
   },
   probeDuration: {
     label: '读取真实时长',

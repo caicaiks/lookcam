@@ -55,7 +55,11 @@ function applySideEffects(keys) {
   const notes = [];
   let rescan = false;
 
-  const needRescan = keys.includes('watchDir') || keys.includes('device') || keys.includes('probeDuration');
+  const needRescan =
+    keys.includes('watchDir') ||
+    keys.includes('device') ||
+    keys.includes('scanDepth') ||
+    keys.includes('probeDuration');
   if (needRescan) {
     setImmediate(() => store.scan({ full: true }).catch(() => {}));
     notes.push('已开始全量重扫，稍等片刻');
@@ -129,19 +133,34 @@ function readJson(req, limit = 64 * 1024) {
 }
 
 /**
+ * 相对目录路径是否可疑。
+ * k 是片段所在目录相对于 WATCH_DIR 的路径，可以有多级，也可以是空串（片段就在根目录）。
+ */
+function badRelPath(rel) {
+  if (!rel) return false;
+  if (rel.length > 1024) return true;
+  if (rel.includes('\0') || rel.includes('\\')) return true;
+  for (const seg of rel.split('/')) {
+    if (!seg || seg === '.' || seg === '..') return true;
+  }
+  return false;
+}
+
+/**
  * 把请求参数还原成磁盘上的文件路径。
- * 各段都做严格字符校验，天然挡住 ../ 之类的穿越。
+ * k = 相对目录，f = 文件名。两者都做严格校验，最后再用规范化后的前缀比对兜一层，
+ * 保证无论如何都出不了 WATCH_DIR。
  */
 function resolveSegment(q) {
-  const device = String(q.d || '');
-  const dirName = String(q.k || '');
-  const file = String(q.f || '');
+  const rel = String(q.k ?? '');
+  const file = String(q.f ?? '');
 
-  if (!/^\d{10}$/.test(dirName)) return null;
-  if (device && !/^[A-Za-z0-9_-]{1,64}$/.test(device)) return null;
-  if (!/^[0-9HMS]+_\d+\.mp4$/i.test(file)) return null;
+  if (badRelPath(rel)) return null;
+  if (!file || file.length > 255) return null;
+  if (file.startsWith('.') || /[/\\\0]/.test(file)) return null;
+  if (!/\.mp4$/i.test(file)) return null;
 
-  const full = path.join(cfg.watchDir, device, dirName, file);
+  const full = path.join(cfg.watchDir, ...(rel ? rel.split('/') : []), file);
   const normalized = path.normalize(full);
   const root = path.normalize(cfg.watchDir + path.sep);
   if (!normalized.startsWith(root)) return null;

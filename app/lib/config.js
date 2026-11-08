@@ -36,6 +36,8 @@ const config = {
   // 同时扫描的目录数。串行扫一个目录要等一串 stat/open，并行能快 3-4 倍；
   // 走网络挂载时这个值还受链路带宽约束，本地盘可以再开大些
   scanConcurrency: envInt('SCAN_CONCURRENCY', 4),
+  // 往下钻几层找 mp4。不假设目录命名，只限制深度，防止在奇怪的挂载点上无限递归
+  scanDepth: envInt('SCAN_DEPTH', 4),
   // 单个目录内同时探测的文件数
   fileConcurrency: envInt('FILE_CONCURRENCY', 8),
   // 启动时是否立刻全量扫描一次
